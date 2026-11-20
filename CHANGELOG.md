@@ -2,7 +2,7 @@
 
 Grouped by entry point. Versions follow semver across the whole package.
 
-## 0.1.0 — unreleased
+## 0.1.0 — 2026-11-20
 
 - `refs`: `parseRef`, `formatRef`, `isRef` for `sr:<app>:<type>:<id>` references.
 - `events`: the event envelope, `validateEvent`, `isEventType`, `newEventId`, and signed delivery (`signingKey`, `signBody`, `verifyDelivery`, `HEADER`).
