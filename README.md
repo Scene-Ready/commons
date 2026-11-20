@@ -66,7 +66,7 @@ npm run build       # dist/, as consumers get it
 
 ## Release
 
-1. Add the change under a new version in `CHANGELOG.md`, grouped by entry point, and bump `version` in `package.json`.
-2. Merge to `main`, then tag the merge commit `vX.Y.Z` and push the tag.
+1. In the PR, bump `version` in `package.json` and add a `## X.Y.Z — YYYY-MM-DD` section to `CHANGELOG.md`, grouped by entry point.
+2. Merge to `main`, then run the **Release** workflow from `main`. It checks the build, tags `vX.Y.Z` and publishes a GitHub release with that changelog section.
 
 Follow semver across the whole package: a breaking change in any entry point is a major bump. Keep breaking changes rare.
