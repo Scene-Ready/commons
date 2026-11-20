@@ -51,7 +51,7 @@ const svg = brandedQrSvg('https://rig.sceneready.app/s/abc', { title: 'Open the 
 
 A module belongs in commons when **two or more apps use it**, it holds **no app's domain logic**, and it keeps **no state**. Each app keeps its own bindings, secrets and configuration; nothing here reads an environment variable. Everything else stays in the app.
 
-Planned next, each behind its own entry point: `m2m` (client-credentials tokens and API errors), `outbox` (the publisher outbox for D1 and Durable Objects), `email` (email wrappers moved from `design-system`, plus sending through a `send_email` binding) and `feedback` (the feedback dialog and server helper).
+Planned next, each behind its own entry point: `m2m` (client-credentials tokens and API errors), `outbox` (the publisher outbox for D1 and Durable Objects), `email` (email wrappers moved from `design-system`, plus sending through a `send_email` binding) and `feedback` (the feedback server helper, with the dialog at `feedback/react`, per the feedback repo's spec 002).
 
 ## Develop
 
