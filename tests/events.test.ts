@@ -77,6 +77,22 @@ describe('validateEvent', () => {
     }
   });
 
+  it('rejects an attribute the standard does not define, by default', () => {
+    expect(validateEvent({ ...event(), traceparent: '00-abc-def-01' })).toEqual({
+      ok: false,
+      errors: ['unknown field: traceparent'],
+    });
+  });
+
+  it('can ignore an unknown attribute and leave it out of the event', () => {
+    const e = event();
+    const result = validateEvent(
+      { ...e, traceparent: '00-abc-def-01' },
+      { unknownAttributes: 'ignore' },
+    );
+    expect(result).toEqual({ ok: true, event: e });
+  });
+
   it('refuses a type the source does not own', () => {
     expect(validateEvent(event({ type: 'quarters.alert.received.v1' })).ok).toBe(false);
   });
@@ -183,6 +199,13 @@ describe('signed delivery', () => {
     expect(await verifyDelivery(d, { secret, now: NOW })).toMatchObject({
       reason: 'bad_signature',
     });
+  });
+
+  it('ignores an attribute it does not know and leaves it out of the event', async () => {
+    const e = event();
+    const body = JSON.stringify({ ...e, traceparent: '00-abc-def-01' });
+    const result = await verifyDelivery(await delivery(body, NOW / 1000), { secret, now: NOW });
+    expect(result).toEqual({ ok: true, event: e, attempt: 2 });
   });
 
   it('refuses a signed body that is not a valid event', async () => {
