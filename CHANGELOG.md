@@ -2,7 +2,7 @@
 
 Grouped by entry point. Versions follow semver across the whole package.
 
-## 0.2.0 — Unreleased
+## 0.2.0 — 2026-11-21
 
 - `refs`: **Breaking.** `parseRef`, `isRef` and `formatRef` follow ADR-0003's spelling: app keys use lowercase letters, digits and single hyphens (`rig-prep`, not `rig_prep`), and Record types are snake_case (`corrective_action`, not `corrective-action`).
 - `events`: **Breaking.** `validateEvent` rejects an event whose `subject` names a record the `source` app does not own (`subject must be a reference owned by "<source>"`), per the event standard's owned-subjects rule.
