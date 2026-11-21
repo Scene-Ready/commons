@@ -42,13 +42,15 @@ CloudEvents 1.0 attribute names, plus `orgid` and `actor`. Types and validation 
 
 ## Publishing
 
-Publishers call the Hub over a service binding (`EVENTS_HUB`), and every publisher keeps a **transactional outbox**:
+Publishers call the Hub over a service binding (`EVENTS_HUB`), and every publisher keeps a **transactional outbox**. D1 apps use `@scene-ready/commons/outbox`, which implements these rules ([ADR-0006](../adr/0006-outbox-design.md)):
 
 1. Write the outbox row in the same D1 batch, or the same Durable Object transaction, as the change.
 2. Set the event `id` then, so every retry carries the same id.
 3. Send after commit, inside `ctx.waitUntil`, so the user's request never waits on the Hub.
 4. Clear the row only when the Hub acknowledges it.
 5. Sweep unacknowledged rows on a cron trigger (D1 apps) or a Durable Object alarm, with backoff.
+6. Keep a rejected event in the outbox, marked rejected, and never retry it. A rejection is a publisher bug: fix it, then remove the row.
+7. Retry unacknowledged rows indefinitely, with backoff capped at one hour. Never drop an event the Hub hasn't acknowledged.
 
 The Hub acknowledges only after writing the event to its log, and treats a repeated `id` as already published.
 

@@ -4,7 +4,9 @@
 
 ```text
 src/<module>/index.ts   one entry point per module, listed in package.json "exports"
-tests/                  Vitest, one file per module
+tests/                  Vitest in Node, one file per module
+tests/d1/               Vitest in workerd on real D1, for modules that use it
+migrations/<module>/    SQL a module ships for apps to copy (ADR 0005)
 docs/contracts/         the API and event standards these modules enforce
 docs/adr/               decisions
 ```
@@ -15,8 +17,8 @@ docs/adr/               decisions
 
 ## Rules
 
-- **No state, no configuration.** Nothing reads environment variables, bindings or secrets; callers pass them in.
-- **Runs in Workers and browsers.** Use Web Platform APIs (`crypto.subtle`, `fetch`, `TextEncoder`), never `node:` modules.
+- **No state of its own, no configuration.** Nothing reads environment variables, bindings or secrets; callers pass them in. A module may define a table that the app owns, lives in the app's database and the app migrates (ADR 0005): ship it as `migrations/<module>/NNNN_*.sql`, additive only, with a version constant and a CHANGELOG line.
+- **Runs in Workers and browsers.** Use Web Platform APIs (`crypto.subtle`, `fetch`, `TextEncoder`), never `node:` modules. A module built on a Workers binding (`outbox`, on D1) runs in Workers only; say so in its README row.
 - **A new module** gets its own entry point in `package.json` `exports`, a test file, a `CHANGELOG.md` line and a README table row. Framework-specific code goes behind its own entry point over a framework-neutral core.
 - **Breaking changes** to any entry point are a major version. Update `docs/contracts/` in the same change when a standard moves.
 - **No dependency** without a reason: every app installs it. Prefer optional peer dependencies for frameworks.

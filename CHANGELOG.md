@@ -2,6 +2,13 @@
 
 Grouped by entry point. Versions follow semver across the whole package.
 
+## 0.3.0 — 2026-11-21
+
+- `outbox`: New entry point, the publisher's transactional outbox on D1: `outboxStatements`, `sendPending`, `sweepOutbox`, `listRejected`, `nextAttemptAt` and `OUTBOX_SCHEMA_VERSION`. See ADR-0006.
+- `outbox`: **Copy `migrations/outbox/0001_outbox_event.sql`** into each D1 database you publish events from, under your own migration number.
+- `events`: `EventsHub`, the Hub's `publish` and `catchUp` as apps see them over `EVENTS_HUB`, with `PublishResult` and `CatchUpResult`.
+- `events`: `validateDraft(draft, app)` checks a draft as the Hub will once `app` publishes it. The outbox and the Hub both use it.
+
 ## 0.2.0 — 2026-11-21
 
 - `refs`: **Breaking.** `parseRef`, `isRef` and `formatRef` follow ADR-0003's spelling: app keys use lowercase letters, digits and single hyphens (`rig-prep`, not `rig_prep`), and Record types are snake_case (`corrective_action`, not `corrective-action`).
