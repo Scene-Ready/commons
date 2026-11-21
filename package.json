@@ -1,6 +1,6 @@
 {
   "name": "@scene-ready/commons",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Shared code for Scene Ready apps: cross-app references, the event standard, branded QR codes.",
   "private": true,
   "license": "UNLICENSED",
