@@ -1,4 +1,5 @@
 import { parseRef } from '../refs';
+import { APP_KEY, APP_KEY_PATTERN, SNAKE_CASE_PATTERN } from '../refs/grammar';
 
 /**
  * The event envelope every Scene Ready app publishes and receives: CloudEvents
@@ -10,7 +11,7 @@ export interface EventEnvelope<Data extends Record<string, unknown> = Record<str
   specversion: '1.0';
   /** ULID, set by the publisher when it writes its outbox row; stable across retries. */
   id: string;
-  /** `<source>.<entity>.<past-tense verb>.v<major>`, such as `platform.corrective_action.closed.v1`. */
+  /** `<source>.<record_type>.<past-tense verb>.v<major>`, such as `platform.corrective_action.closed.v1`. */
   type: string;
   /** The publishing app's key. The events Worker sets it from the caller's binding. */
   source: string;
@@ -35,8 +36,10 @@ export type EventDraft<Data extends Record<string, unknown> = Record<string, unk
 /** Hard cap on the serialized `data`, to keep events as hints. */
 export const MAX_DATA_BYTES = 2048;
 
-const APP = /^[a-z][a-z0-9-]*$/;
-const TYPE = /^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9_]*)+\.v[1-9][0-9]*$/;
+/** `<source>.<record_type>.<verb>.v<major>`: an app key, then two snake_case segments. */
+const TYPE = new RegExp(
+  `^${APP_KEY_PATTERN}\\.${SNAKE_CASE_PATTERN}\\.${SNAKE_CASE_PATTERN}\\.v[1-9][0-9]*$`,
+);
 const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 const ORG = /^[A-Za-z0-9._~-]{1,128}$/;
 
@@ -64,10 +67,11 @@ export function validateEvent(value: unknown): Validation {
   const id = str('id');
   if (!id || !ULID.test(id)) errors.push('id must be a ULID');
   const source = str('source');
-  if (!source || !APP.test(source)) errors.push('source must be an app key');
+  const owner = source && APP_KEY.test(source) ? source : undefined;
+  if (!owner) errors.push('source must be an app key');
   const type = str('type');
   if (!type || !isEventType(type)) {
-    errors.push('type must be <source>.<entity>.<verb>.v<major>');
+    errors.push('type must be <source>.<record_type>.<verb>.v<major>');
   } else if (source && !type.startsWith(`${source}.`)) {
     errors.push(`type must start with "${source}."`);
   }
@@ -81,8 +85,8 @@ export function validateEvent(value: unknown): Validation {
   const subjectRef = subject ? parseRef(subject) : null;
   if (!subjectRef) {
     errors.push('subject must be an sr: reference');
-  } else if (source && APP.test(source) && subjectRef.app !== source) {
-    errors.push(`subject must be a reference owned by "${source}"`);
+  } else if (owner && subjectRef.app !== owner) {
+    errors.push(`subject must be a reference owned by "${owner}"`);
   }
   if (e.actor !== undefined && (typeof e.actor !== 'string' || e.actor.length === 0)) {
     errors.push('actor must be a user id when present');

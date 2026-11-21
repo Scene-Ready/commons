@@ -37,11 +37,24 @@ describe('event ids', () => {
 });
 
 describe('event types', () => {
-  it('needs source, entity, verb and major version', () => {
+  it('needs source, record type, verb and major version', () => {
     expect(isEventType('platform.corrective_action.closed.v1', 'platform')).toBe(true);
     expect(isEventType('platform.closed', 'platform')).toBe(false);
     expect(isEventType('platform.task.closed', 'platform')).toBe(false);
     expect(isEventType('quarters.alert.received.v1', 'platform')).toBe(false);
+  });
+
+  it('refuses a hyphenated record type', () => {
+    expect(isEventType('platform.corrective-action.closed.v1', 'platform')).toBe(false);
+  });
+
+  it.each([
+    'platform.corrective__action.closed.v1',
+    'platform.task_.closed.v1',
+    'platform.task.v1',
+    'platform.task.sub.closed.v1',
+  ])('refuses the type %s', (type) => {
+    expect(isEventType(type, 'platform')).toBe(false);
   });
 });
 
@@ -93,6 +106,35 @@ describe('validateEvent', () => {
       expect(result.errors).toContain('source must be an app key');
       expect(result.errors.some((m) => m.startsWith('subject'))).toBe(false);
     }
+  });
+
+  it('accepts a hyphenated app key and a snake_case record type', () => {
+    const result = validateEvent(
+      event({
+        source: 'rig-prep',
+        type: 'rig-prep.corrective_action.closed.v1',
+        subject: 'sr:rig-prep:corrective_action:ca_1',
+      }),
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it('refuses an underscored app key', () => {
+    const result = validateEvent(
+      event({
+        source: 'rig_prep',
+        type: 'rig_prep.rig.checked.v1',
+        subject: 'sr:rig_prep:rig:rig_9',
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors).toContain('source must be an app key');
+  });
+
+  it.each(['rig-', 'rig--prep'])('refuses the app key %s', (source) => {
+    const result = validateEvent(event({ source, type: `${source}.rig.checked.v1` }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.errors).toContain('source must be an app key');
   });
 
   it('keeps data small', () => {
