@@ -37,13 +37,32 @@ describe('event ids', () => {
 });
 
 describe('event types', () => {
-  it('needs source, entity, verb and major version', () => {
+  it('needs source, record type, verb and major version', () => {
     expect(isEventType('platform.corrective_action.closed.v1', 'platform')).toBe(true);
     expect(isEventType('platform.closed', 'platform')).toBe(false);
     expect(isEventType('platform.task.closed', 'platform')).toBe(false);
     expect(isEventType('quarters.alert.received.v1', 'platform')).toBe(false);
   });
+
+  it('refuses a hyphenated record type', () => {
+    expect(isEventType('platform.corrective-action.closed.v1', 'platform')).toBe(false);
+  });
+
+  it.each([
+    'platform.corrective__action.closed.v1',
+    'platform.task_.closed.v1',
+    'platform.task.v1',
+    'platform.task.sub.closed.v1',
+  ])('refuses the type %s', (type) => {
+    expect(isEventType(type, 'platform')).toBe(false);
+  });
 });
+
+/** The problems `validateEvent` reports; empty when the event is valid. */
+function errorsOf(value: unknown): string[] {
+  const result = validateEvent(value);
+  return result.ok ? [] : result.errors;
+}
 
 describe('validateEvent', () => {
   it('accepts a well-formed event', () => {
@@ -58,14 +77,72 @@ describe('validateEvent', () => {
         expect.arrayContaining([
           'id must be a ULID',
           'subject must be an sr: reference',
-          'unknown field: extra',
+          'unknown attribute: extra',
         ]),
       );
     }
   });
 
+  it('rejects an attribute the standard does not define, by default', () => {
+    expect(validateEvent({ ...event(), traceparent: '00-abc-def-01' })).toEqual({
+      ok: false,
+      errors: ['unknown attribute: traceparent'],
+    });
+  });
+
+  it('can ignore an unknown attribute and leave it out of the event', () => {
+    const e = event();
+    const result = validateEvent(
+      { ...e, traceparent: '00-abc-def-01' },
+      { unknownAttributes: 'ignore' },
+    );
+    expect(result).toEqual({ ok: true, event: e });
+  });
+
   it('refuses a type the source does not own', () => {
     expect(validateEvent(event({ type: 'quarters.alert.received.v1' })).ok).toBe(false);
+  });
+
+  it('refuses a subject the source does not own', () => {
+    const result = validateEvent(event({ subject: 'sr:rigprep:rig:rig_9' }));
+    expect(result).toEqual({
+      ok: false,
+      errors: ['subject must be a reference owned by "platform"'],
+    });
+  });
+
+  it('accepts a subject the source owns', () => {
+    expect(validateEvent(event({ subject: 'sr:platform:location:loc_123' })).ok).toBe(true);
+  });
+
+  it('reports only the source error when the source is invalid', () => {
+    // A valid type and a foreign subject: neither can be owned by a source that isn't an app key.
+    expect(errorsOf(event({ source: 'Platform', subject: 'sr:rigprep:rig:rig_9' }))).toEqual([
+      'source must be an app key',
+    ]);
+  });
+
+  it('accepts a hyphenated app key and a snake_case record type', () => {
+    const result = validateEvent(
+      event({
+        source: 'rig-prep',
+        type: 'rig-prep.corrective_action.closed.v1',
+        subject: 'sr:rig-prep:corrective_action:ca_1',
+      }),
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it.each(['rig_prep', 'rig-', 'rig--prep'])('refuses the app key %s', (source) => {
+    expect(
+      errorsOf(event({ source, type: `${source}.rig.checked.v1`, subject: `sr:${source}:rig:r1` })),
+    ).toContain('source must be an app key');
+  });
+
+  it('refuses a subject with a hyphenated record type', () => {
+    expect(errorsOf(event({ subject: 'sr:platform:corrective-action:ca_1' }))).toEqual([
+      'subject must be an sr: reference',
+    ]);
   });
 
   it('keeps data small', () => {
@@ -114,6 +191,13 @@ describe('signed delivery', () => {
     expect(await verifyDelivery(d, { secret, now: NOW })).toMatchObject({
       reason: 'bad_signature',
     });
+  });
+
+  it('ignores an attribute it does not know and leaves it out of the event', async () => {
+    const e = event();
+    const body = JSON.stringify({ ...e, traceparent: '00-abc-def-01' });
+    const result = await verifyDelivery(await delivery(body, NOW / 1000), { secret, now: NOW });
+    expect(result).toEqual({ ok: true, event: e, attempt: 2 });
   });
 
   it('refuses a signed body that is not a valid event', async () => {

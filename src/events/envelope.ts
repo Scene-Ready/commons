@@ -1,4 +1,5 @@
-import { isRef } from '../refs';
+import { parseRef } from '../refs';
+import { APP_KEY, APP_KEY_PATTERN, SNAKE_CASE_PATTERN } from '../refs/grammar';
 
 /**
  * The event envelope every Scene Ready app publishes and receives: CloudEvents
@@ -10,7 +11,7 @@ export interface EventEnvelope<Data extends Record<string, unknown> = Record<str
   specversion: '1.0';
   /** ULID, set by the publisher when it writes its outbox row; stable across retries. */
   id: string;
-  /** `<source>.<entity>.<past-tense verb>.v<major>`, such as `platform.corrective_action.closed.v1`. */
+  /** `<source>.<record_type>.<past-tense verb>.v<major>`, such as `platform.corrective_action.closed.v1`. */
   type: string;
   /** The publishing app's key. The events Worker sets it from the caller's binding. */
   source: string;
@@ -35,8 +36,10 @@ export type EventDraft<Data extends Record<string, unknown> = Record<string, unk
 /** Hard cap on the serialized `data`, to keep events as hints. */
 export const MAX_DATA_BYTES = 2048;
 
-const APP = /^[a-z][a-z0-9-]*$/;
-const TYPE = /^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9_]*)+\.v[1-9][0-9]*$/;
+/** `<source>.<record_type>.<verb>.v<major>`: an app key, then two snake_case segments. */
+const TYPE = new RegExp(
+  `^${APP_KEY_PATTERN}\\.${SNAKE_CASE_PATTERN}\\.${SNAKE_CASE_PATTERN}\\.v[1-9][0-9]*$`,
+);
 const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 const ORG = /^[A-Za-z0-9._~-]{1,128}$/;
 
@@ -48,11 +51,36 @@ export function isEventType(type: string, source?: string): boolean {
 
 export type Validation = { ok: true; event: EventEnvelope } | { ok: false; errors: string[] };
 
+export interface ValidateOptions {
+  /**
+   * What to do with an attribute the standard does not define. `'reject'`
+   * (the default) is for the Hub, which is strict about what it accepts.
+   * `'ignore'` is for subscribers: the attribute is dropped from the returned
+   * event, so the envelope can gain optional attributes without a major version.
+   */
+  unknownAttributes?: 'reject' | 'ignore';
+}
+
+/** Every attribute the standard defines. A `Record` so a new envelope attribute can't be missed. */
+const ATTRIBUTES = new Set<string>(
+  Object.keys({
+    specversion: true,
+    id: true,
+    type: true,
+    source: true,
+    time: true,
+    orgid: true,
+    subject: true,
+    actor: true,
+    data: true,
+  } satisfies Record<keyof EventEnvelope, true>),
+);
+
 /**
  * Checks an envelope against the standard. Returns every problem found, so a
  * publisher sees them all at once.
  */
-export function validateEvent(value: unknown): Validation {
+export function validateEvent(value: unknown, options: ValidateOptions = {}): Validation {
   const errors: string[] = [];
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return { ok: false, errors: ['event must be an object'] };
@@ -64,12 +92,13 @@ export function validateEvent(value: unknown): Validation {
   const id = str('id');
   if (!id || !ULID.test(id)) errors.push('id must be a ULID');
   const source = str('source');
-  if (!source || !APP.test(source)) errors.push('source must be an app key');
+  const owner = source && APP_KEY.test(source) ? source : undefined;
+  if (!owner) errors.push('source must be an app key');
   const type = str('type');
   if (!type || !isEventType(type)) {
-    errors.push('type must be <source>.<entity>.<verb>.v<major>');
-  } else if (source && !type.startsWith(`${source}.`)) {
-    errors.push(`type must start with "${source}."`);
+    errors.push('type must be <source>.<record_type>.<verb>.v<major>');
+  } else if (owner && !isEventType(type, owner)) {
+    errors.push(`type must start with "${owner}."`);
   }
   const time = str('time');
   if (!time || Number.isNaN(Date.parse(time)) || !time.endsWith('Z')) {
@@ -77,7 +106,13 @@ export function validateEvent(value: unknown): Validation {
   }
   const orgid = str('orgid');
   if (!orgid || !ORG.test(orgid)) errors.push('orgid must be an auth organization id');
-  if (!isRef(e.subject)) errors.push('subject must be an sr: reference');
+  const subject = str('subject');
+  const subjectRef = subject ? parseRef(subject) : null;
+  if (!subjectRef) {
+    errors.push('subject must be an sr: reference');
+  } else if (owner && subjectRef.app !== owner) {
+    errors.push(`subject must be a reference owned by "${owner}"`);
+  }
   if (e.actor !== undefined && (typeof e.actor !== 'string' || e.actor.length === 0)) {
     errors.push('actor must be a user id when present');
   }
@@ -88,18 +123,11 @@ export function validateEvent(value: unknown): Validation {
       errors.push(`data must be at most ${MAX_DATA_BYTES} bytes`);
     }
   }
-  const known = new Set([
-    'specversion',
-    'id',
-    'type',
-    'source',
-    'time',
-    'orgid',
-    'subject',
-    'actor',
-    'data',
-  ]);
-  for (const k of Object.keys(e)) if (!known.has(k)) errors.push(`unknown field: ${k}`);
+  if (options.unknownAttributes !== 'ignore') {
+    for (const k of Object.keys(e)) if (!ATTRIBUTES.has(k)) errors.push(`unknown attribute: ${k}`);
+  }
+  if (errors.length) return { ok: false, errors };
 
-  return errors.length ? { ok: false, errors } : { ok: true, event: e as unknown as EventEnvelope };
+  const event = Object.fromEntries(Object.entries(e).filter(([k]) => ATTRIBUTES.has(k)));
+  return { ok: true, event: event as unknown as EventEnvelope };
 }

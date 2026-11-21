@@ -12,6 +12,10 @@ describe('cross-app references', () => {
     expect(parseRef('sr:platform:corrective_action:tsk-9')?.type).toBe('corrective_action');
   });
 
+  it('accepts a hyphenated app key', () => {
+    expect(parseRef('sr:rig-prep:rig:rig_9')?.app).toBe('rig-prep');
+  });
+
   it.each([
     'platform:location:loc_123',
     'sr:platform:location',
@@ -20,6 +24,8 @@ describe('cross-app references', () => {
     'sr:platform:location:',
     'sr:platform:location:has space',
     'x:platform:location:1',
+    'sr:rig_prep:rig:rig_9',
+    'sr:platform:corrective-action:tsk-9',
   ])('rejects %s', (value) => {
     expect(parseRef(value)).toBeNull();
     expect(isRef(value)).toBe(false);

@@ -103,7 +103,8 @@ export async function verifyDelivery(
   } catch {
     return { ok: false, reason: 'bad_event', detail: ['body is not JSON'] };
   }
-  const checked = validateEvent(parsed);
+  // Strict in, lenient out: a subscriber ignores attributes it does not know.
+  const checked = validateEvent(parsed, { unknownAttributes: 'ignore' });
   if (!checked.ok) return { ok: false, reason: 'bad_event', detail: checked.errors };
 
   const attempt = Number(input.headers.get(HEADER.attempt) ?? '1');

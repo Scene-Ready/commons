@@ -42,6 +42,7 @@ Problem Details JSON ([RFC 9457](https://www.rfc-editor.org/rfc/rfc9457)) with `
 ## Cross-app references
 
 - A pointer to another app's record is `sr:<app>:<type>:<id>` (`@scene-ready/commons/refs`), per [ADR-0003](../adr/0003-references-are-sr-strings.md), for example `sr:platform:location:loc_123`.
+- App keys use lowercase letters, digits and single hyphens (`rig-prep`); Record types are snake_case (`corrective_action`). Events use the same rules ([event standard](event-standard.md)).
 - The owner documents how to resolve each type it exposes.
 - A reference whose target is gone resolves to 404; the holder shows it as unavailable and keeps its own record.
 - A holder may cache a display value (a name) beside the reference, refreshed from the owner and never edited locally.

@@ -7,9 +7,11 @@
  * docs/contracts/api-standard.md.
  */
 
+import { APP_KEY, RECORD_TYPE } from './grammar';
+
 /** A parsed cross-app reference. */
 export interface Ref {
-  /** The owning app's key, such as `platform` or `rigprep`. */
+  /** The owning app's key, such as `platform` or `rig-prep`. */
   app: string;
   /** The record type, in the owner's vocabulary, such as `location`. */
   type: string;
@@ -18,8 +20,6 @@ export interface Ref {
 }
 
 const PREFIX = 'sr';
-/** Lowercase words joined by hyphens or underscores: `corrective_action`. */
-const NAME = /^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/;
 /** URL-safe characters, no colon, at most 128 long. */
 const ID = /^[A-Za-z0-9._~-]{1,128}$/;
 
@@ -28,7 +28,7 @@ export function parseRef(value: string): Ref | null {
   const parts = value.split(':');
   if (parts.length !== 4 || parts[0] !== PREFIX) return null;
   const [, app, type, id] = parts as [string, string, string, string];
-  if (!NAME.test(app) || !NAME.test(type) || !ID.test(id)) return null;
+  if (!APP_KEY.test(app) || !RECORD_TYPE.test(type) || !ID.test(id)) return null;
   return { app, type, id };
 }
 

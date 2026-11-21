@@ -8,6 +8,7 @@ export {
   validateEvent,
   type EventDraft,
   type EventEnvelope,
+  type ValidateOptions,
   type Validation,
 } from './envelope';
 export { newEventId } from './id';

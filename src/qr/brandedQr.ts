@@ -1,5 +1,5 @@
 import { encode } from 'uqr';
-import { SCENE_READY_MARK } from './sceneReadyMark';
+import { SCENE_READY_LOGO } from './sceneReadyLogo';
 import type { BrandedQr, BrandedQrOptions, BrandedQrSvgOptions, QrLogoPlate } from './types';
 
 /** The plate's default side, as a share of the symbol's side. */
@@ -14,10 +14,10 @@ export const DEFAULT_QUIET_ZONE = 4;
 /** The plate's corner radius, as a share of its side. */
 const PLATE_RADIUS = 0.12;
 /**
- * The light margin between the plate's edge and the mark, in modules. A
- * whole number, so the mark's box lands on module edges, as the modules do.
+ * The light margin between the plate's edge and the logo, in modules. A
+ * whole number, so the logo's box lands on module edges, as the modules do.
  */
-const MARK_MARGIN = 1;
+const LOGO_MARGIN = 1;
 /** Plates smaller than this many modules keep half a module of margin. */
 const MIN_PLATE_FOR_MARGIN = 5;
 
@@ -27,7 +27,7 @@ const MIN_PLATE_FOR_MARGIN = 5;
  */
 export function brandedQr(text: string, options: BrandedQrOptions = {}): BrandedQr {
   const {
-    logo = SCENE_READY_MARK,
+    logo = SCENE_READY_LOGO,
     logoScale = DEFAULT_LOGO_SCALE,
     ecc = 'H',
     quietZone = DEFAULT_QUIET_ZONE,
@@ -47,14 +47,14 @@ export function brandedQr(text: string, options: BrandedQrOptions = {}): Branded
     for (let y = start; y < start + side; y++) {
       for (let x = start; x < start + side; x++) modules[y][x] = false;
     }
-    plate = { x: start, y: start, size: side, mark: logo };
+    plate = { x: start, y: start, size: side, logo };
   }
   return {
     size: qr.size,
     quietZone,
     version: qr.version,
     modules,
-    logo: plate,
+    plate,
   };
 }
 
@@ -86,13 +86,13 @@ export function plateRadius(plate: QrLogoPlate): number {
 }
 
 /**
- * The transform that draws the plate's mark, from its own units into the
+ * The transform that draws the plate's logo, from its own units into the
  * grid's modules: its box fills the plate but for a one-module margin, so it
  * is as large as the plate allows and its edges sit on the module grid.
  */
-export function markTransform(plate: QrLogoPlate): string {
-  const { box } = plate.mark;
-  const inset = plate.size >= MIN_PLATE_FOR_MARGIN ? MARK_MARGIN : 0.5;
+export function logoTransform(plate: QrLogoPlate): string {
+  const { box } = plate.logo;
+  const inset = plate.size >= MIN_PLATE_FOR_MARGIN ? LOGO_MARGIN : 0.5;
   const scale = (plate.size - 2 * inset) / box.size;
   const x = plate.x + inset - box.x * scale;
   const y = plate.y + inset - box.y * scale;
@@ -130,12 +130,12 @@ export function brandedQrSvg(text: string, options: BrandedQrSvgOptions = {}): s
     `<rect width="${qr.size}" height="${qr.size}" fill="${light}"/>`,
     `<path d="${qrPathData(qr.modules)}" fill="${dark}"/>`,
   );
-  const plate = qr.logo;
+  const { plate } = qr;
   if (plate) {
     parts.push(
       `<rect x="${plate.x}" y="${plate.y}" width="${plate.size}" height="${plate.size}" rx="${plateRadius(plate)}" fill="${light}"/>`,
-      `<g transform="${markTransform(plate)}" shape-rendering="geometricPrecision">`,
-      ...plate.mark.paths.map((p) => `<path d="${escapeXml(p.d)}" fill="${escapeXml(p.fill)}"/>`),
+      `<g transform="${logoTransform(plate)}" shape-rendering="geometricPrecision">`,
+      ...plate.logo.paths.map((p) => `<path d="${escapeXml(p.d)}" fill="${escapeXml(p.fill)}"/>`),
       '</g>',
     );
   }
