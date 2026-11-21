@@ -15,7 +15,7 @@ How one Scene Ready app calls another. Each app owns its API and its resources, 
 ## Tenancy
 
 - Every route is scoped to an auth organization in its path: `/api/m2m/v1/orgs/{orgId}/…`.
-- The receiving app refuses an organization the calling app has no relationship with in auth, and never takes an organization id from a request body.
+- The receiving app refuses an organization the calling app has no org relationship with, and never takes an organization id from a request body.
 
 ## Acting user
 
@@ -41,7 +41,7 @@ Problem Details JSON ([RFC 9457](https://www.rfc-editor.org/rfc/rfc9457)) with `
 
 ## Cross-app references
 
-- A pointer to another app's record is `sr:<app>:<type>:<id>` (`@scene-ready/commons/refs`), for example `sr:platform:location:loc_123`.
+- A pointer to another app's record is `sr:<app>:<type>:<id>` (`@scene-ready/commons/refs`), per [ADR-0003](../adr/0003-references-are-sr-strings.md), for example `sr:platform:location:loc_123`.
 - The owner documents how to resolve each type it exposes.
 - A reference whose target is gone resolves to 404; the holder shows it as unavailable and keeps its own record.
 - A holder may cache a display value (a name) beside the reference, refreshed from the owner and never edited locally.

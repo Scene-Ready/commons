@@ -25,8 +25,12 @@ docs/adr/               decisions
 
 ### Issue tracker
 
-Issues live in GitHub Issues on `Scene-Ready/commons`.
+Issues live in GitHub Issues on `Scene-Ready/commons`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
-`docs/contracts/` holds the standards; decisions go in `docs/adr/` using the `domain-modeling` skill.
+Single-context: `GLOSSARY.md` (created lazily) and `docs/adr/` at the root, plus the standards in `docs/contracts/`. Record decisions with the `domain-modeling` skill. See `docs/agents/domain.md`.
