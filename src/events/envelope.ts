@@ -1,4 +1,4 @@
-import { isRef } from '../refs';
+import { parseRef } from '../refs';
 
 /**
  * The event envelope every Scene Ready app publishes and receives: CloudEvents
@@ -77,7 +77,13 @@ export function validateEvent(value: unknown): Validation {
   }
   const orgid = str('orgid');
   if (!orgid || !ORG.test(orgid)) errors.push('orgid must be an auth organization id');
-  if (!isRef(e.subject)) errors.push('subject must be an sr: reference');
+  const subject = str('subject');
+  const subjectRef = subject ? parseRef(subject) : null;
+  if (!subjectRef) {
+    errors.push('subject must be an sr: reference');
+  } else if (source && APP.test(source) && subjectRef.app !== source) {
+    errors.push(`subject must be a reference owned by "${source}"`);
+  }
   if (e.actor !== undefined && (typeof e.actor !== 'string' || e.actor.length === 0)) {
     errors.push('actor must be a user id when present');
   }

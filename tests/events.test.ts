@@ -68,6 +68,33 @@ describe('validateEvent', () => {
     expect(validateEvent(event({ type: 'quarters.alert.received.v1' })).ok).toBe(false);
   });
 
+  it('refuses a subject the source does not own', () => {
+    const result = validateEvent(event({ subject: 'sr:rigprep:rig:rig_9' }));
+    expect(result).toEqual({
+      ok: false,
+      errors: ['subject must be a reference owned by "platform"'],
+    });
+  });
+
+  it('accepts a subject the source owns', () => {
+    expect(validateEvent(event({ subject: 'sr:platform:location:loc_123' })).ok).toBe(true);
+  });
+
+  it('reports only the source error when the source is invalid', () => {
+    const result = validateEvent(
+      event({
+        source: 'Platform',
+        type: 'Platform.task.closed.v1',
+        subject: 'sr:rigprep:rig:rig_9',
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors).toContain('source must be an app key');
+      expect(result.errors.some((m) => m.startsWith('subject'))).toBe(false);
+    }
+  });
+
   it('keeps data small', () => {
     expect(validateEvent(event({ data: { note: 'x'.repeat(3000) } })).ok).toBe(false);
   });
