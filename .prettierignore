@@ -1,3 +1,3 @@
-dist
-node_modules
-package-lock.json
+# Vendored agent skills, managed by skills-lock.json
+.claude/
+skills-lock.json
