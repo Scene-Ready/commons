@@ -1,5 +1,5 @@
 import { encode } from 'uqr';
-import { SCENE_READY_MARK } from './sceneReadyMark';
+import { SCENE_READY_LOGO } from './sceneReadyLogo';
 import type { BrandedQr, BrandedQrOptions, BrandedQrSvgOptions, QrLogoPlate } from './types';
 
 /** The plate's default side, as a share of the symbol's side. */
@@ -27,7 +27,7 @@ const MIN_PLATE_FOR_MARGIN = 5;
  */
 export function brandedQr(text: string, options: BrandedQrOptions = {}): BrandedQr {
   const {
-    logo = SCENE_READY_MARK,
+    logo = SCENE_READY_LOGO,
     logoScale = DEFAULT_LOGO_SCALE,
     ecc = 'H',
     quietZone = DEFAULT_QUIET_ZONE,

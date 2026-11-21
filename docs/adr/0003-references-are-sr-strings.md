@@ -17,4 +17,4 @@ A single string fits in one column and one envelope attribute, and it can be com
 ## Consequences
 
 - No part may contain `:`. Ids are limited to URL-safe characters, at most 128 long.
-- `refs` and `events` share one grammar: app keys use lowercase letters, digits and hyphens, and Record types use snake_case.
+- `refs` and `events` share one grammar: app keys use lowercase letters, digits and single hyphens, and Record types use snake_case.

@@ -11,7 +11,7 @@ import { APP_KEY, RECORD_TYPE } from './grammar';
 
 /** A parsed cross-app reference. */
 export interface Ref {
-  /** The owning app's key, such as `platform` or `rigprep`. */
+  /** The owning app's key, such as `platform` or `rig-prep`. */
   app: string;
   /** The record type, in the owner's vocabulary, such as `location`. */
   type: string;

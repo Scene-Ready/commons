@@ -97,8 +97,8 @@ export function validateEvent(value: unknown, options: ValidateOptions = {}): Va
   const type = str('type');
   if (!type || !isEventType(type)) {
     errors.push('type must be <source>.<record_type>.<verb>.v<major>');
-  } else if (source && !type.startsWith(`${source}.`)) {
-    errors.push(`type must start with "${source}."`);
+  } else if (owner && !isEventType(type, owner)) {
+    errors.push(`type must start with "${owner}."`);
   }
   const time = str('time');
   if (!time || Number.isNaN(Date.parse(time)) || !time.endsWith('Z')) {
@@ -124,7 +124,7 @@ export function validateEvent(value: unknown, options: ValidateOptions = {}): Va
     }
   }
   if (options.unknownAttributes !== 'ignore') {
-    for (const k of Object.keys(e)) if (!ATTRIBUTES.has(k)) errors.push(`unknown field: ${k}`);
+    for (const k of Object.keys(e)) if (!ATTRIBUTES.has(k)) errors.push(`unknown attribute: ${k}`);
   }
   if (errors.length) return { ok: false, errors };
 

@@ -58,6 +58,12 @@ describe('event types', () => {
   });
 });
 
+/** The problems `validateEvent` reports; empty when the event is valid. */
+function errorsOf(value: unknown): string[] {
+  const result = validateEvent(value);
+  return result.ok ? [] : result.errors;
+}
+
 describe('validateEvent', () => {
   it('accepts a well-formed event', () => {
     expect(validateEvent(event()).ok).toBe(true);
@@ -71,7 +77,7 @@ describe('validateEvent', () => {
         expect.arrayContaining([
           'id must be a ULID',
           'subject must be an sr: reference',
-          'unknown field: extra',
+          'unknown attribute: extra',
         ]),
       );
     }
@@ -80,7 +86,7 @@ describe('validateEvent', () => {
   it('rejects an attribute the standard does not define, by default', () => {
     expect(validateEvent({ ...event(), traceparent: '00-abc-def-01' })).toEqual({
       ok: false,
-      errors: ['unknown field: traceparent'],
+      errors: ['unknown attribute: traceparent'],
     });
   });
 
@@ -110,18 +116,10 @@ describe('validateEvent', () => {
   });
 
   it('reports only the source error when the source is invalid', () => {
-    const result = validateEvent(
-      event({
-        source: 'Platform',
-        type: 'Platform.task.closed.v1',
-        subject: 'sr:rigprep:rig:rig_9',
-      }),
-    );
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.errors).toContain('source must be an app key');
-      expect(result.errors.some((m) => m.startsWith('subject'))).toBe(false);
-    }
+    // A valid type and a foreign subject: neither can be owned by a source that isn't an app key.
+    expect(errorsOf(event({ source: 'Platform', subject: 'sr:rigprep:rig:rig_9' }))).toEqual([
+      'source must be an app key',
+    ]);
   });
 
   it('accepts a hyphenated app key and a snake_case record type', () => {
@@ -135,22 +133,16 @@ describe('validateEvent', () => {
     expect(result.ok).toBe(true);
   });
 
-  it('refuses an underscored app key', () => {
-    const result = validateEvent(
-      event({
-        source: 'rig_prep',
-        type: 'rig_prep.rig.checked.v1',
-        subject: 'sr:rig_prep:rig:rig_9',
-      }),
-    );
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.errors).toContain('source must be an app key');
+  it.each(['rig_prep', 'rig-', 'rig--prep'])('refuses the app key %s', (source) => {
+    expect(
+      errorsOf(event({ source, type: `${source}.rig.checked.v1`, subject: `sr:${source}:rig:r1` })),
+    ).toContain('source must be an app key');
   });
 
-  it.each(['rig-', 'rig--prep'])('refuses the app key %s', (source) => {
-    const result = validateEvent(event({ source, type: `${source}.rig.checked.v1` }));
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.errors).toContain('source must be an app key');
+  it('refuses a subject with a hyphenated record type', () => {
+    expect(errorsOf(event({ subject: 'sr:platform:corrective-action:ca_1' }))).toEqual([
+      'subject must be an sr: reference',
+    ]);
   });
 
   it('keeps data small', () => {

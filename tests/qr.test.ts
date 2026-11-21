@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import jsQR from 'jsqr';
-import { brandedQr, brandedQrSvg, qrPathData, SCENE_READY_MARK, type BrandedQr } from '../src/qr';
+import { brandedQr, brandedQrSvg, qrPathData, SCENE_READY_LOGO, type BrandedQr } from '../src/qr';
 
 /** Pixels per module when a code is drawn for the decoder. */
 const PX = 6;
@@ -54,8 +54,8 @@ describe('brandedQr', () => {
     expect(decode(qr)).toBe(SHARE);
   });
 
-  it('carries the Scene Ready mark by default', () => {
-    expect(brandedQr(SHARE).plate?.logo).toBe(SCENE_READY_MARK);
+  it('carries the Scene Ready logo by default', () => {
+    expect(brandedQr(SHARE).plate?.logo).toBe(SCENE_READY_LOGO);
   });
 
   it('centres the logo plate and clears every module under it', () => {
@@ -123,7 +123,7 @@ describe('brandedQrSvg', () => {
     expect(svg).toMatch(/^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/);
     expect(svg).toContain(`viewBox="0 0 ${qr.size} ${qr.size}"`);
     expect(svg).toContain(qrPathData(qr.modules));
-    for (const path of SCENE_READY_MARK.paths) expect(svg).toContain(path.d);
+    for (const path of SCENE_READY_LOGO.paths) expect(svg).toContain(path.d);
     expect(svg).toContain('<title>Open the live rig</title>');
   });
 

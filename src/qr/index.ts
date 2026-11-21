@@ -11,7 +11,7 @@ export {
   MAX_LOGO_SCALE,
   qrPathData,
 } from './brandedQr';
-export { SCENE_READY_MARK } from './sceneReadyMark';
+export { SCENE_READY_LOGO } from './sceneReadyLogo';
 export type {
   BrandedQr,
   BrandedQrOptions,
