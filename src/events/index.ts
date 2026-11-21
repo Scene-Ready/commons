@@ -1,6 +1,6 @@
 /**
- * The Scene Ready event standard: the envelope, event ids, and signed
- * delivery. See docs/contracts/event-standard.md.
+ * The Scene Ready event standard: the envelope, event ids, the Hub's
+ * interface, and signed delivery. See docs/contracts/event-standard.md.
  */
 export {
   isEventType,
@@ -11,6 +11,7 @@ export {
   type ValidateOptions,
   type Validation,
 } from './envelope';
+export { validateDraft, type CatchUpResult, type EventsHub, type PublishResult } from './hub';
 export { newEventId } from './id';
 export {
   DEFAULT_TOLERANCE_SECONDS,

@@ -89,5 +89,5 @@ _Avoid_: replay, backfill, resync
 ### This package
 
 **Module**:
-Code that two or more Apps use, holds no App's domain logic and keeps no state, published behind its own entry point.
+Code that two or more Apps use, holds no App's domain logic and holds no state of its own, published behind its own entry point. A table it defines belongs to the App that uses it.
 _Avoid_: package, lib, library

@@ -5,6 +5,7 @@ import {
   newEventId,
   signBody,
   signingKey,
+  validateDraft,
   validateEvent,
   verifyDelivery,
   type EventEnvelope,
@@ -203,5 +204,41 @@ describe('signed delivery', () => {
   it('refuses a signed body that is not a valid event', async () => {
     const d = await delivery(JSON.stringify({ hello: 'world' }), NOW / 1000);
     expect(await verifyDelivery(d, { secret, now: NOW })).toMatchObject({ reason: 'bad_event' });
+  });
+});
+
+describe('validateDraft', () => {
+  const published = event();
+  const draft = (): Record<string, unknown> =>
+    Object.fromEntries(
+      Object.entries(published).filter(([k]) => k !== 'specversion' && k !== 'source'),
+    );
+
+  it('fills in specversion and source from the app', () => {
+    expect(validateDraft(draft(), 'platform')).toEqual({ ok: true, event: published });
+  });
+
+  it('checks ownership against the app, not the draft', () => {
+    expect(validateDraft({ ...draft(), source: 'platform' }, 'quarters')).toEqual({
+      ok: false,
+      errors: [
+        'type must start with "quarters."',
+        'subject must be a reference owned by "quarters"',
+      ],
+    });
+  });
+
+  it('rejects an attribute the standard does not define', () => {
+    expect(validateDraft({ ...draft(), priority: 'high' }, 'platform')).toEqual({
+      ok: false,
+      errors: ['unknown attribute: priority'],
+    });
+  });
+
+  it('rejects a draft that is not an object', () => {
+    expect(validateDraft(null, 'platform')).toEqual({
+      ok: false,
+      errors: ['event must be an object'],
+    });
   });
 });
