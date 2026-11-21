@@ -41,7 +41,7 @@ export interface QrLogoPlate {
   y: number;
   size: number;
   /** The logo drawn on the plate. */
-  mark: QrLogo;
+  logo: QrLogo;
 }
 
 /** A code laid out on a square grid of modules, quiet zone included. */

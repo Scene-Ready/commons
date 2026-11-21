@@ -62,7 +62,7 @@ export function QrCode({
             fill={light}
           />
           <g transform={logoTransform(plate)} shapeRendering="geometricPrecision">
-            {plate.mark.paths.map((p, i) => (
+            {plate.logo.paths.map((p, i) => (
               <path key={i} d={p.d} fill={p.fill} />
             ))}
           </g>

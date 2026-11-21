@@ -74,7 +74,7 @@ describe('brandedQr', () => {
   });
 
   it('carries the Scene Ready mark by default', () => {
-    expect(brandedQr(SHARE).logo?.mark).toBe(SCENE_READY_MARK);
+    expect(brandedQr(SHARE).logo?.logo).toBe(SCENE_READY_MARK);
   });
 
   it('centres the logo plate and clears every module under it', () => {

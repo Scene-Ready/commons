@@ -47,7 +47,7 @@ export function brandedQr(text: string, options: BrandedQrOptions = {}): Branded
     for (let y = start; y < start + side; y++) {
       for (let x = start; x < start + side; x++) modules[y][x] = false;
     }
-    plate = { x: start, y: start, size: side, mark: logo };
+    plate = { x: start, y: start, size: side, logo };
   }
   return {
     size: qr.size,
@@ -91,7 +91,7 @@ export function plateRadius(plate: QrLogoPlate): number {
  * is as large as the plate allows and its edges sit on the module grid.
  */
 export function logoTransform(plate: QrLogoPlate): string {
-  const { box } = plate.mark;
+  const { box } = plate.logo;
   const inset = plate.size >= MIN_PLATE_FOR_MARGIN ? LOGO_MARGIN : 0.5;
   const scale = (plate.size - 2 * inset) / box.size;
   const x = plate.x + inset - box.x * scale;
@@ -135,7 +135,7 @@ export function brandedQrSvg(text: string, options: BrandedQrSvgOptions = {}): s
     parts.push(
       `<rect x="${plate.x}" y="${plate.y}" width="${plate.size}" height="${plate.size}" rx="${plateRadius(plate)}" fill="${light}"/>`,
       `<g transform="${logoTransform(plate)}" shape-rendering="geometricPrecision">`,
-      ...plate.mark.paths.map((p) => `<path d="${escapeXml(p.d)}" fill="${escapeXml(p.fill)}"/>`),
+      ...plate.logo.paths.map((p) => `<path d="${escapeXml(p.d)}" fill="${escapeXml(p.fill)}"/>`),
       '</g>',
     );
   }

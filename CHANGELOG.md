@@ -9,6 +9,7 @@ Grouped by entry point. Versions follow semver across the whole package.
 - `events`: **Breaking.** `validateEvent` and `isEventType` use the same rules for `source` and for the `<source>` and `<record_type>` segments of an Event type. The verb stays snake_case, and a type must have exactly four segments, `<source>.<record_type>.<verb>.v<major>` (`platform.task.v1` no longer passes). Its error now reads `type must be <source>.<record_type>.<verb>.v<major>`.
 - `events`: `validateEvent` takes `{ unknownAttributes: 'reject' | 'ignore' }`, defaulting to `'reject'`. `verifyDelivery` uses `'ignore'`, so a signed delivery with an attribute the subscriber doesn't know is accepted and the attribute is left out of the returned event, per the event standard's "strict in, lenient out" rule.
 - `qr`: the logo option's types are `QrLogo` and `QrLogoPath`, matching `logo`. `QrMark` and `QrMarkPath` stay as deprecated aliases.
+- `qr`: **Breaking.** `QrLogoPlate.mark` is renamed `QrLogoPlate.logo`, so the default logo is `brandedQr(text).logo?.logo`.
 
 ## 0.1.0 — 2026-11-20
 
