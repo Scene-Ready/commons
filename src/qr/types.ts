@@ -1,5 +1,5 @@
-/** One filled path of a mark, in the mark's own units. */
-export interface QrMarkPath {
+/** One filled path of a logo, in the logo's own units. */
+export interface QrLogoPath {
   d: string;
   fill: string;
 }
@@ -9,16 +9,21 @@ export interface QrMarkPath {
  * their units, `box`, that is fitted to the plate. Crop `box` to the
  * artwork so the logo fills its plate.
  */
-export interface QrMark {
+export interface QrLogo {
   box: { x: number; y: number; size: number };
-  paths: readonly QrMarkPath[];
+  paths: readonly QrLogoPath[];
 }
+
+/** @deprecated Use QrLogo. */
+export type QrMark = QrLogo;
+/** @deprecated Use QrLogoPath. */
+export type QrMarkPath = QrLogoPath;
 
 export type QrErrorCorrection = 'L' | 'M' | 'Q' | 'H';
 
 export interface BrandedQrOptions {
   /** The logo in the middle; `null` for a plain code. The Scene Ready mark by default. */
-  logo?: QrMark | null;
+  logo?: QrLogo | null;
   /**
    * The logo plate's side as a share of the symbol's side, at most
    * `MAX_LOGO_SCALE`. 0.25 by default: about 6% of the modules.
@@ -35,7 +40,8 @@ export interface QrLogoPlate {
   x: number;
   y: number;
   size: number;
-  mark: QrMark;
+  /** The logo drawn on the plate. */
+  mark: QrLogo;
 }
 
 /** A code laid out on a square grid of modules, quiet zone included. */

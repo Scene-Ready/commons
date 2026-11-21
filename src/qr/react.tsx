@@ -1,5 +1,5 @@
 import { useMemo, type CSSProperties } from 'react';
-import { brandedQr, markTransform, plateRadius, qrPathData } from './brandedQr';
+import { brandedQr, logoTransform, plateRadius, qrPathData } from './brandedQr';
 import type { BrandedQrOptions } from './types';
 
 export interface QrCodeProps extends BrandedQrOptions {
@@ -61,7 +61,7 @@ export function QrCode({
             rx={plateRadius(plate)}
             fill={light}
           />
-          <g transform={markTransform(plate)} shapeRendering="geometricPrecision">
+          <g transform={logoTransform(plate)} shapeRendering="geometricPrecision">
             {plate.mark.paths.map((p, i) => (
               <path key={i} d={p.d} fill={p.fill} />
             ))}

@@ -1,13 +1,24 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, expectTypeOf } from 'vitest';
 import jsQR from 'jsqr';
-import { brandedQr, brandedQrSvg, qrPathData, SCENE_READY_MARK, type BrandedQr } from '../src/qr';
+import {
+  brandedQr,
+  brandedQrSvg,
+  qrPathData,
+  SCENE_READY_MARK,
+  type BrandedQr,
+  type BrandedQrOptions,
+  type QrLogo,
+  type QrLogoPath,
+  type QrMark,
+  type QrMarkPath,
+} from '../src/qr';
 
 /** Pixels per module when a code is drawn for the decoder. */
 const PX = 6;
 
 /**
  * Draws the code's modules for the decoder: dark black, light white. The
- * plate's modules are drawn light; the mark on it is left out, since every
+ * plate's modules are drawn light; the logo on it is left out, since every
  * module under the plate is lost to the decoder whatever is drawn there.
  */
 function decode(qr: BrandedQr): string | null {
@@ -52,6 +63,14 @@ describe('brandedQr', () => {
     const qr = brandedQr(SHARE, { logo: null });
     expect(qr.logo).toBeNull();
     expect(decode(qr)).toBe(SHARE);
+  });
+
+  it('types the logo option as QrLogo, keeping QrMark as an alias', () => {
+    expectTypeOf(SCENE_READY_MARK).toEqualTypeOf<QrLogo>();
+    expectTypeOf<NonNullable<BrandedQrOptions['logo']>>().toEqualTypeOf<QrLogo>();
+    expectTypeOf<QrLogo['paths'][number]>().toEqualTypeOf<QrLogoPath>();
+    expectTypeOf<QrMark>().toEqualTypeOf<QrLogo>();
+    expectTypeOf<QrMarkPath>().toEqualTypeOf<QrLogoPath>();
   });
 
   it('carries the Scene Ready mark by default', () => {

@@ -17,6 +17,8 @@ export type {
   BrandedQrOptions,
   BrandedQrSvgOptions,
   QrErrorCorrection,
+  QrLogo,
+  QrLogoPath,
   QrLogoPlate,
   QrMark,
   QrMarkPath,
