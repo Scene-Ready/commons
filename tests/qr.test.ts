@@ -1,17 +1,6 @@
-import { describe, it, expect, expectTypeOf } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import jsQR from 'jsqr';
-import {
-  brandedQr,
-  brandedQrSvg,
-  qrPathData,
-  SCENE_READY_MARK,
-  type BrandedQr,
-  type BrandedQrOptions,
-  type QrLogo,
-  type QrLogoPath,
-  type QrMark,
-  type QrMarkPath,
-} from '../src/qr';
+import { brandedQr, brandedQrSvg, qrPathData, SCENE_READY_MARK, type BrandedQr } from '../src/qr';
 
 /** Pixels per module when a code is drawn for the decoder. */
 const PX = 6;
@@ -49,7 +38,7 @@ describe('brandedQr', () => {
     ['a long link', `${ORG}&${'x'.repeat(120)}`],
   ])('decodes %s with the logo in the middle', (_name, text) => {
     const qr = brandedQr(text);
-    expect(qr.logo).not.toBeNull();
+    expect(qr.plate).not.toBeNull();
     expect(decode(qr)).toBe(text);
   });
 
@@ -61,29 +50,21 @@ describe('brandedQr', () => {
 
   it('decodes without a logo', () => {
     const qr = brandedQr(SHARE, { logo: null });
-    expect(qr.logo).toBeNull();
+    expect(qr.plate).toBeNull();
     expect(decode(qr)).toBe(SHARE);
   });
 
-  it('types the logo option as QrLogo, keeping QrMark as an alias', () => {
-    expectTypeOf(SCENE_READY_MARK).toEqualTypeOf<QrLogo>();
-    expectTypeOf<NonNullable<BrandedQrOptions['logo']>>().toEqualTypeOf<QrLogo>();
-    expectTypeOf<QrLogo['paths'][number]>().toEqualTypeOf<QrLogoPath>();
-    expectTypeOf<QrMark>().toEqualTypeOf<QrLogo>();
-    expectTypeOf<QrMarkPath>().toEqualTypeOf<QrLogoPath>();
-  });
-
   it('carries the Scene Ready mark by default', () => {
-    expect(brandedQr(SHARE).logo?.logo).toBe(SCENE_READY_MARK);
+    expect(brandedQr(SHARE).plate?.logo).toBe(SCENE_READY_MARK);
   });
 
   it('centres the logo plate and clears every module under it', () => {
     const qr = brandedQr(ORG);
-    const logo = qr.logo!;
-    expect(logo.x + logo.size / 2).toBeCloseTo(qr.size / 2);
-    expect(logo.y + logo.size / 2).toBeCloseTo(qr.size / 2);
-    for (let y = logo.y; y < logo.y + logo.size; y++) {
-      for (let x = logo.x; x < logo.x + logo.size; x++) {
+    const plate = qr.plate!;
+    expect(plate.x + plate.size / 2).toBeCloseTo(qr.size / 2);
+    expect(plate.y + plate.size / 2).toBeCloseTo(qr.size / 2);
+    for (let y = plate.y; y < plate.y + plate.size; y++) {
+      for (let x = plate.x; x < plate.x + plate.size; x++) {
         expect(qr.modules[y][x]).toBe(false);
       }
     }
@@ -93,7 +74,7 @@ describe('brandedQr', () => {
     for (const text of ['https://sceneready.app', SHARE, ORG]) {
       const qr = brandedQr(text);
       const symbol = qr.size - 2 * qr.quietZone;
-      expect(qr.logo!.size ** 2 / symbol ** 2).toBeLessThanOrEqual(0.08);
+      expect(qr.plate!.size ** 2 / symbol ** 2).toBeLessThanOrEqual(0.08);
     }
   });
 

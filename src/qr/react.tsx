@@ -36,7 +36,7 @@ export function QrCode({
     [value, logo, logoScale, ecc, quietZone],
   );
   const d = useMemo(() => qrPathData(qr.modules), [qr]);
-  const plate = qr.logo;
+  const { plate } = qr;
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"

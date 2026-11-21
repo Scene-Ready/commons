@@ -14,11 +14,6 @@ export interface QrLogo {
   paths: readonly QrLogoPath[];
 }
 
-/** @deprecated Use QrLogo. */
-export type QrMark = QrLogo;
-/** @deprecated Use QrLogoPath. */
-export type QrMarkPath = QrLogoPath;
-
 export type QrErrorCorrection = 'L' | 'M' | 'Q' | 'H';
 
 export interface BrandedQrOptions {
@@ -52,7 +47,8 @@ export interface BrandedQr {
   version: number;
   /** Row-major; `true` is dark. Modules under the logo plate are light. */
   modules: boolean[][];
-  logo: QrLogoPlate | null;
+  /** Where the logo sits; `null` for a plain code. */
+  plate: QrLogoPlate | null;
 }
 
 export interface BrandedQrSvgOptions extends BrandedQrOptions {

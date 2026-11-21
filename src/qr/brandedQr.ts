@@ -54,7 +54,7 @@ export function brandedQr(text: string, options: BrandedQrOptions = {}): Branded
     quietZone,
     version: qr.version,
     modules,
-    logo: plate,
+    plate,
   };
 }
 
@@ -130,7 +130,7 @@ export function brandedQrSvg(text: string, options: BrandedQrSvgOptions = {}): s
     `<rect width="${qr.size}" height="${qr.size}" fill="${light}"/>`,
     `<path d="${qrPathData(qr.modules)}" fill="${dark}"/>`,
   );
-  const plate = qr.logo;
+  const { plate } = qr;
   if (plate) {
     parts.push(
       `<rect x="${plate.x}" y="${plate.y}" width="${plate.size}" height="${plate.size}" rx="${plateRadius(plate)}" fill="${light}"/>`,

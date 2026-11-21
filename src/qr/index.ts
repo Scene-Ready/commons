@@ -20,6 +20,4 @@ export type {
   QrLogo,
   QrLogoPath,
   QrLogoPlate,
-  QrMark,
-  QrMarkPath,
 } from './types';
