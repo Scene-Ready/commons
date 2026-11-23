@@ -34,8 +34,11 @@ export interface SendResult {
   failed: { id: string; error: string; stuck: boolean }[];
 }
 
-/** From this many failed Attempts (about an hour of trying), a row is reported stuck. */
-const STUCK_AFTER_ATTEMPTS = 8;
+/**
+ * From this many failed Attempts (about an hour of trying), a row is reported
+ * stuck: the sweep logs it at error level, and `listStuck` lists it.
+ */
+export const STUCK_AFTER_ATTEMPTS = 8;
 
 /** `last_error` keeps this much of the thrown message. */
 const MAX_ERROR_LENGTH = 500;
@@ -45,6 +48,9 @@ const FIRST_SWEEP_DELAY_MS = 60_000;
 
 /** How many due rows one sweep sends, unless told otherwise. */
 const DEFAULT_SWEEP_LIMIT = 100;
+
+/** How many stuck rows `listStuck` returns, unless told otherwise. */
+const DEFAULT_STUCK_LIMIT = 100;
 
 /**
  * The statements that write `draft` to the outbox. Put them in the same
@@ -275,5 +281,56 @@ export async function listRejected(db: D1DatabaseLike): Promise<RejectedEvent[]>
     rejectedAt: r.rejected_at,
     attempts: r.attempts,
     errors: r.errors ? (JSON.parse(r.errors) as string[]) : [],
+  }));
+}
+
+/** An event the Hub has not acknowledged after `STUCK_AFTER_ATTEMPTS` or more Attempts. */
+export interface StuckEvent {
+  id: string;
+  draft: EventDraft;
+  createdAt: number;
+  attempts: number;
+  lastError: string | null;
+  /** When the sweep next sends it. */
+  nextAttemptAt: number;
+}
+
+/**
+ * The rows the outbox reports stuck, oldest first, at most `limit` (default
+ * 100). The sweep keeps sending them; nothing needs doing once the Hub is
+ * reachable again.
+ *
+ * A row that is due at `now` is left out: a failed Attempt always schedules the
+ * next in the future, so a due row hasn't failed since it was last scheduled.
+ * That keeps out a row `resendRejected` just made due, which keeps its old
+ * count, until the sweep has tried it. It also leaves out, until the sweep
+ * runs, a stuck row whose next Attempt has come round.
+ */
+export async function listStuck(
+  db: D1DatabaseLike,
+  options: { now?: number; limit?: number } = {},
+): Promise<StuckEvent[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT id, body, created_at, attempts, last_error, next_attempt_at FROM outbox_event
+       WHERE rejected_at IS NULL AND attempts >= ? AND next_attempt_at > ?
+       ORDER BY created_at, id LIMIT ?`,
+    )
+    .bind(STUCK_AFTER_ATTEMPTS, options.now ?? Date.now(), options.limit ?? DEFAULT_STUCK_LIMIT)
+    .all<{
+      id: string;
+      body: string;
+      created_at: number;
+      attempts: number;
+      last_error: string | null;
+      next_attempt_at: number;
+    }>();
+  return results.map((r) => ({
+    id: r.id,
+    draft: decodeDraft(r.body),
+    createdAt: r.created_at,
+    attempts: r.attempts,
+    lastError: r.last_error,
+    nextAttemptAt: r.next_attempt_at,
   }));
 }

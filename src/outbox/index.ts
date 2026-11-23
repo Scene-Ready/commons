@@ -7,14 +7,17 @@
 export { nextAttemptAt } from './backoff';
 export {
   listRejected,
+  listStuck,
   outboxStatements,
   resendRejected,
   sendPending,
+  STUCK_AFTER_ATTEMPTS,
   sweepOutbox,
   type D1DatabaseLike,
   type D1StatementLike,
   type HubPublish,
   type RejectedEvent,
   type SendResult,
+  type StuckEvent,
 } from './outbox';
 export { OUTBOX_SCHEMA_VERSION } from './schema';

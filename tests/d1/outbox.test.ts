@@ -3,10 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newEventId, type EventDraft, type EventsHub, type PublishResult } from '../../src/events';
 import {
   listRejected,
+  listStuck,
+  nextAttemptAt,
   OUTBOX_SCHEMA_VERSION,
   outboxStatements,
   resendRejected,
   sendPending,
+  STUCK_AFTER_ATTEMPTS,
   sweepOutbox,
 } from '../../src/outbox';
 
@@ -334,6 +337,97 @@ describe('sweepOutbox', () => {
       'outbox: event stuck, the Hub has not acknowledged it',
       expect.objectContaining({ id: eighth.id, attempts: 8 }),
     );
+  });
+});
+
+describe('listStuck', () => {
+  const lost = 'Network connection lost.';
+  const down = () => {
+    throw new Error(lost);
+  };
+  const refuse = (): PublishResult => ({ ok: false, errors: ['refused'] });
+  /** Late enough that every row committed at `NOW` or just after is due. */
+  const failedAt = NOW + 10 * MINUTE;
+
+  /** Commits `d` at `createdAt` with `attempts` failed Attempts already counted. */
+  const commitWithAttempts = async (attempts: number, createdAt = NOW, d = draft()) => {
+    await env.DB.batch(outboxStatements(env.DB, d, { app: APP, now: createdAt }));
+    await env.DB.prepare(`UPDATE outbox_event SET attempts = ? WHERE id = ?`)
+      .bind(attempts, d.id)
+      .run();
+    return d;
+  };
+
+  /** One more failed Attempt for every row due at `at`. */
+  const failAll = (at: number) => sweepOutbox(env.DB, fakeHub(down).hub, { now: at });
+
+  it('lists a row from the failed Attempt the outbox reports stuck', async () => {
+    await commitWithAttempts(STUCK_AFTER_ATTEMPTS - 2);
+    const stuck = await commitWithAttempts(STUCK_AFTER_ATTEMPTS - 1);
+
+    const { failed } = await failAll(failedAt);
+    expect(failed.filter((f) => f.stuck).map((f) => f.id)).toEqual([stuck.id]);
+    expect(await listStuck(env.DB, { now: failedAt })).toEqual([
+      {
+        id: stuck.id,
+        draft: stuck,
+        createdAt: NOW,
+        attempts: STUCK_AFTER_ATTEMPTS,
+        lastError: lost,
+        nextAttemptAt: expect.any(Number),
+      },
+    ]);
+    const [{ nextAttemptAt: next }] = await listStuck(env.DB, { now: failedAt });
+    // The backoff is jittered, so check the range it spreads over.
+    expect(next).toBeGreaterThanOrEqual(nextAttemptAt(STUCK_AFTER_ATTEMPTS, failedAt, 0));
+    expect(next).toBeLessThanOrEqual(nextAttemptAt(STUCK_AFTER_ATTEMPTS, failedAt, 1));
+  });
+
+  it('leaves out a rejected row', async () => {
+    const event = await commitWithAttempts(STUCK_AFTER_ATTEMPTS - 1);
+    await failAll(failedAt);
+    await sendPending(env.DB, fakeHub(refuse).hub, [event], { now: failedAt });
+
+    expect(await listRejected(env.DB)).toMatchObject([{ id: event.id }]);
+    expect(await listStuck(env.DB, { now: failedAt })).toEqual([]);
+  });
+
+  it('leaves out a resent row until it fails again', async () => {
+    const event = await commitWithAttempts(STUCK_AFTER_ATTEMPTS);
+    await sendPending(env.DB, fakeHub(refuse).hub, [event], { now: NOW });
+    const later = NOW + 60 * MINUTE;
+    await resendRejected(env.DB, event.id, { now: later });
+
+    expect(await listStuck(env.DB, { now: later })).toEqual([]);
+
+    await failAll(later);
+    expect(await listStuck(env.DB, { now: later })).toMatchObject([
+      { id: event.id, attempts: STUCK_AFTER_ATTEMPTS + 1 },
+    ]);
+  });
+
+  it('lists at most `limit` rows, oldest first', async () => {
+    const third = await commitWithAttempts(
+      STUCK_AFTER_ATTEMPTS - 1,
+      NOW + 2,
+      draft({ id: newEventId(NOW + 2) }),
+    );
+    const first = await commitWithAttempts(
+      STUCK_AFTER_ATTEMPTS - 1,
+      NOW,
+      draft({ id: newEventId(NOW) }),
+    );
+    const second = await commitWithAttempts(
+      STUCK_AFTER_ATTEMPTS - 1,
+      NOW + 1,
+      draft({ id: newEventId(NOW + 1) }),
+    );
+    await failAll(failedAt);
+
+    const ids = async (limit?: number) =>
+      (await listStuck(env.DB, { now: failedAt, limit })).map((e) => e.id);
+    expect(await ids()).toEqual([first.id, second.id, third.id]);
+    expect(await ids(2)).toEqual([first.id, second.id]);
   });
 });
 
