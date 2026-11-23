@@ -8,6 +8,7 @@ export { nextAttemptAt } from './backoff';
 export {
   listRejected,
   outboxStatements,
+  resendRejected,
   sendPending,
   sweepOutbox,
   type D1DatabaseLike,

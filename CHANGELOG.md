@@ -2,6 +2,13 @@
 
 Grouped by entry point. Versions follow semver across the whole package.
 
+## 0.5.0 — 2026-11-23
+
+- `outbox`: `resendRejected(db, id, { now? })` clears a row's rejection and makes it due, so the next sweep sends it. Call it after fixing the cause of a rejection (the Hub on a different commons version, a misconfigured binding). Rejected rows are still never retried automatically (ADR-0006).
+- `outbox`: `sendPending` logs a warning (`no outbox row for this event; was the batch committed?`) when a first send fails and the event has no row. Send only after `await db.batch(...)` resolves.
+- `events`: **Breaking** for the Hub. `EventsHub.publish` answers `ok: false` only for a draft that fails `validateDraft` or an App the Hub can't identify; any other failure throws, so the publisher retries it. The event standard's Publishing section says the same, and rule 6 now reads "fix it, then remove or resend the row". The outbox's handling of `ok: false` and of a throw is unchanged, so this is not breaking for publishers.
+- **Upgrade order:** deploy the Hub with Scene-Ready/events#14 (temporary failures throw) before auth moves past v0.3.0. An older Hub answers temporary failures with `ok: false`, which parks events as rejected; resend any it parked with `resendRejected`.
+
 ## 0.4.0 — 2026-11-22
 
 - `events`: `cursorAt(ms)`, the lowest event id for a millisecond, to use as a Catch-up cursor when recovering missed deliveries.

@@ -49,10 +49,10 @@ Publishers call the Hub over a service binding (`EVENTS_HUB`), and every publish
 3. Send after commit, inside `ctx.waitUntil`, so the user's request never waits on the Hub.
 4. Clear the row only when the Hub acknowledges it.
 5. Sweep unacknowledged rows on a cron trigger (D1 apps) or a Durable Object alarm, with backoff.
-6. Keep a rejected event in the outbox, marked rejected, and never retry it. A rejection is a publisher bug: fix it, then remove the row.
+6. Keep a rejected event in the outbox, marked rejected, and never retry it automatically. A rejection means the publisher and the Hub disagree on the check (different commons versions, or a misconfigured binding): fix it, then remove or resend the row.
 7. Retry unacknowledged rows indefinitely, with backoff capped at one hour. Never drop an event the Hub hasn't acknowledged.
 
-The Hub acknowledges only after writing the event to its log, and treats a repeated `id` as already published.
+The Hub acknowledges only after writing the event to its log, and treats a repeated `id` as already published. Since a rejection is permanent, `publish` answers `ok: false` only for a draft that fails `validateDraft`, or for an App the Hub can't identify. Any other failure, such as the Hub's own storage being unavailable, throws, and the publisher retries.
 
 ## Delivery
 
