@@ -6,7 +6,7 @@ Shared code for Scene Ready apps: cross-app references, the event standard and i
 | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
 | `@scene-ready/commons/refs`     | `sr:<app>:<type>:<id>` references: `parseRef`, `formatRef`, `isRef`                                                                                   | anywhere      |
 | `@scene-ready/commons/events`   | The event envelope, `validateEvent`, `validateDraft`, `newEventId`, `cursorAt`, the Hub's interface (`EventsHub`), signed delivery (`verifyDelivery`) | Workers, Node |
-| `@scene-ready/commons/outbox`   | The publisher's transactional outbox on D1: `outboxStatements`, `sendPending`, `sweepOutbox`, `resendRejected`                                        | Workers       |
+| `@scene-ready/commons/outbox`   | The publisher's transactional outbox on D1: `outboxStatements`, `sendPending`, `sweepOutbox`, `resendRejected`, `listRejected`, `listStuck`           | Workers       |
 | `@scene-ready/commons/qr`       | Branded QR codes as data or a standalone SVG string (`brandedQrSvg`)                                                                                  | anywhere      |
 | `@scene-ready/commons/qr/react` | `<QrCode>` for React apps                                                                                                                             | browser, SSR  |
 
@@ -75,7 +75,7 @@ ctx.waitUntil(sweepOutbox(env.DB, env.EVENTS_HUB));
 
 Send only after `await env.DB.batch(...)` resolves, never in a `finally` or a `catch`: `sendPending` doesn't read the rows back, so it would publish an event whose change rolled back.
 
-None of these throws because of the Hub. A rejected event stays in `outbox_event` with `rejected_at` set (find them with `listRejected`); fix the cause, then delete the row or call `resendRejected(env.DB, id)` to have the next sweep send it. An event that stays unacknowledged is logged at error level from its eighth attempt; alert on that line.
+None of these throws because of the Hub. A rejected event stays in `outbox_event` with `rejected_at` set (find them with `listRejected`); fix the cause, then delete the row or call `resendRejected(env.DB, id)` to have the next sweep send it. An event that stays unacknowledged is logged at error level from its eighth attempt (`STUCK_AFTER_ATTEMPTS`); alert on that line. `listStuck(env.DB)` lists the same rows for an admin view, so it and the log agree on the threshold.
 
 ## What belongs here
 

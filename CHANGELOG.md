@@ -2,6 +2,11 @@
 
 Grouped by entry point. Versions follow semver across the whole package.
 
+## 0.6.0 — 2026-11-23
+
+- `outbox`: `STUCK_AFTER_ATTEMPTS` (8), the failed Attempt from which the outbox logs a row as stuck, is exported.
+- `outbox`: `listStuck(db, { now?, limit? })` lists the rows the outbox reports stuck, oldest first, as `StuckEvent`s (with `lastError` and `nextAttemptAt`), for an admin view. A row that is due at `now` is left out, so a row `resendRejected` just made due isn't listed until the sweep has tried it. Publishers that copied the 8 into their own query can use this instead.
+
 ## 0.5.0 — 2026-11-23
 
 - `outbox`: `resendRejected(db, id, { now? })` clears a row's rejection and makes it due, so the next sweep sends it. Call it after fixing the cause of a rejection (the Hub on a different commons version, a misconfigured binding). Rejected rows are still never retried automatically (ADR-0006).
