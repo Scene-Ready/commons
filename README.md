@@ -2,13 +2,13 @@
 
 Shared code for Scene Ready apps: cross-app references, the event standard and its outbox, and branded QR codes. One package with an entry point per module, so each app imports only what it uses.
 
-| Entry point                     | What it holds                                                                                                                             | Runs in       |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
-| `@scene-ready/commons/refs`     | `sr:<app>:<type>:<id>` references: `parseRef`, `formatRef`, `isRef`                                                                       | anywhere      |
-| `@scene-ready/commons/events`   | The event envelope, `validateEvent`, `validateDraft`, `newEventId`, the Hub's interface (`EventsHub`), signed delivery (`verifyDelivery`) | Workers, Node |
-| `@scene-ready/commons/outbox`   | The publisher's transactional outbox on D1: `outboxStatements`, `sendPending`, `sweepOutbox`                                              | Workers       |
-| `@scene-ready/commons/qr`       | Branded QR codes as data or a standalone SVG string (`brandedQrSvg`)                                                                      | anywhere      |
-| `@scene-ready/commons/qr/react` | `<QrCode>` for React apps                                                                                                                 | browser, SSR  |
+| Entry point                     | What it holds                                                                                                                                         | Runs in       |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| `@scene-ready/commons/refs`     | `sr:<app>:<type>:<id>` references: `parseRef`, `formatRef`, `isRef`                                                                                   | anywhere      |
+| `@scene-ready/commons/events`   | The event envelope, `validateEvent`, `validateDraft`, `newEventId`, `cursorAt`, the Hub's interface (`EventsHub`), signed delivery (`verifyDelivery`) | Workers, Node |
+| `@scene-ready/commons/outbox`   | The publisher's transactional outbox on D1: `outboxStatements`, `sendPending`, `sweepOutbox`                                                          | Workers       |
+| `@scene-ready/commons/qr`       | Branded QR codes as data or a standalone SVG string (`brandedQrSvg`)                                                                                  | anywhere      |
+| `@scene-ready/commons/qr/react` | `<QrCode>` for React apps                                                                                                                             | browser, SSR  |
 
 The standards these modules enforce are in [`docs/contracts/`](docs/contracts/): the [API standard](docs/contracts/api-standard.md) and the [event standard](docs/contracts/event-standard.md). The overall design is the doc **Scene Ready — Cross-App Data Sharing Standard**.
 
@@ -17,7 +17,7 @@ The standards these modules enforce are in [`docs/contracts/`](docs/contracts/):
 Pin a release tag:
 
 ```sh
-npm install github:Scene-Ready/commons#v0.3.0
+npm install github:Scene-Ready/commons#v0.4.0
 ```
 
 npm builds the package on install (`prepare`). It writes git dependencies to `package-lock.json` as `git+ssh://` URLs, so CI without an SSH key needs this once before `npm ci`:

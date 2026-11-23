@@ -2,6 +2,11 @@
 
 Grouped by entry point. Versions follow semver across the whole package.
 
+## 0.4.0 — 2026-11-22
+
+- `events`: `cursorAt(ms)`, the lowest event id for a millisecond, to use as a Catch-up cursor when recovering missed deliveries.
+- Event standard, Delivery: one retry policy for the Hub (10 attempts over about 4¼ hours, which statuses are retried, `Retry-After` honoured on 429 and 503 up to 1 hour, no redirects) and the rules subscribers follow: answer within 10 seconds, answer duplicates with 2xx, don't rely on order, recover with Catch-up. Catch-up: what to do on `cursor_expired`.
+
 ## 0.3.0 — 2026-11-21
 
 - `outbox`: New entry point, the publisher's transactional outbox on D1: `outboxStatements`, `sendPending`, `sweepOutbox`, `listRejected`, `nextAttemptAt` and `OUTBOX_SCHEMA_VERSION`. See ADR-0006.

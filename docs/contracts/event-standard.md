@@ -58,20 +58,42 @@ The Hub acknowledges only after writing the event to its log, and treats a repea
 
 Each subscription has an HTTPS endpoint and a secret. The Hub POSTs the envelope as the body (`Content-Type: application/cloudevents+json`) with these headers:
 
-| Header             | Meaning                                              |
-| ------------------ | ---------------------------------------------------- |
-| `X-SR-Event-Id`    | The event id; dedupe on it                           |
-| `X-SR-Event-Type`  | The event type                                       |
-| `X-SR-Delivery-Id` | One per (event, subscription); stable across retries |
-| `X-SR-Attempt`     | 1 on the first try, then counting up                 |
-| `X-SR-Timestamp`   | Unix seconds when signed                             |
-| `X-SR-Signature`   | `t=<timestamp>,v1=<hex>`                             |
+| Header             | Meaning                                               |
+| ------------------ | ----------------------------------------------------- |
+| `X-SR-Event-Id`    | The event id; dedupe on it                            |
+| `X-SR-Event-Type`  | The event type                                        |
+| `X-SR-Delivery-Id` | One per (event, subscription); stable across attempts |
+| `X-SR-Attempt`     | 1 on the first try, then counting up                  |
+| `X-SR-Timestamp`   | Unix seconds when signed                              |
+| `X-SR-Signature`   | `t=<timestamp>,v1=<hex>`                              |
 
 The signature is auth's webhook scheme ([ADR-0004](../adr/0004-deliveries-signed-with-auths-webhook-scheme.md)): `v1 = hex(HMAC-SHA256(key, "v1:" + timestamp + ":" + raw_body))`, where `key` is the text of `base64url(SHA-256(secret))`. Subscribers verify with `verifyDelivery`, reject timestamps more than 300 seconds off, and must read the raw body before parsing.
 
-- Any 2xx is success. 5xx, timeouts and 429 (honouring `Retry-After`) are retried with backoff; other 4xx are permanent.
-- A subscription receives events only for organizations its app has an org relationship with, and only for types its scopes allow.
+Any 2xx is success. Anything else is retried or permanent, by this policy:
+
+|                          | Policy                                                                                                                                                                                             |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Attempts                 | 10                                                                                                                                                                                                 |
+| Gap before attempts 2–10 | 30 s, 1 m, 2 m, 4 m, 8 m, 16 m, 32 m, 64 m, 128 m, each ±20% jitter; about 4¼ hours in total                                                                                                       |
+| Retried                  | 5xx, 429, 408, 425, timeouts (10 seconds per attempt), network errors                                                                                                                              |
+| Permanent                | 409, every other 4xx, and any 3xx: the Hub doesn't follow redirects, so register the final URL                                                                                                     |
+| `Retry-After`            | Honoured on 429 and 503 only, as `max(gap, min(Retry-After, 1 hour))`: it can lengthen a gap, never shorten one, and it still counts as an attempt. The longest possible window is about 10 hours. |
+| Giving up                | After the last attempt, or on a permanent status, the delivery has failed and nothing sends it again. The Hub logs it at error level.                                                              |
+| Disabled subscription    | Its pending deliveries fail without an attempt.                                                                                                                                                    |
+
+Subscribers:
+
+- Answer within 10 seconds; do slow work after responding.
+- Answer 2xx for an event you've already processed, deduping on `id`. Don't answer a duplicate with 409.
+- Don't rely on order. Later attempts reorder deliveries, and an event can arrive hours after a newer one on the same subject. Never apply `data` as a change to your copy; dedupe, then refetch the record from its owner.
+- Recover with Catch-up after a delivery fails, after an outage, or after your subscription is re-enabled: catch up from `cursorAt(<a time you know you were healthy>)` and dedupe on `id`. Event ids aren't contiguous, so the last id you received can sit past a gap.
+
+A subscription receives events only for organizations its app has an org relationship with, and only for types its scopes allow.
 
 ## Catch-up
 
 The Hub keeps every event for 7 days. A subscriber that missed deliveries reads a paged feed of its events by cursor over its service binding, then resumes normal delivery.
+
+A cursor is any event id, or `cursorAt(ms)` from `@scene-ready/commons/events`, the lowest id for a millisecond. The feed returns the events after the cursor, oldest first.
+
+If Catch-up answers `cursor_expired`, the cursor is older than the 7 days the Hub keeps, and the events can't be recovered. Fetch current state in full from each owner's API, then catch up from `cursorAt(<the time the full fetch started>)`.
