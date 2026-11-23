@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   HEADER,
+  cursorAt,
   isEventType,
   newEventId,
   signBody,
@@ -34,6 +35,39 @@ describe('event ids', () => {
     const b = newEventId(NOW + 1);
     expect(a).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
     expect(a.slice(0, 10) < b.slice(0, 10)).toBe(true);
+  });
+});
+
+describe('cursorAt', () => {
+  const ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+  const timeOf = (id: string) =>
+    [...id.slice(0, 10)].reduce((t, c) => t * 32 + ALPHABET.indexOf(c), 0);
+
+  it('is the lowest ULID for a millisecond', () => {
+    expect(cursorAt(0)).toBe('00000000000000000000000000');
+    expect(cursorAt(1)).toBe('00000000010000000000000000');
+    expect(cursorAt(2 ** 48 - 1)).toBe('7ZZZZZZZZZ0000000000000000');
+  });
+
+  it('round-trips to its time', () => {
+    expect(timeOf(cursorAt(NOW))).toBe(NOW);
+  });
+
+  it('sorts at or below every id made in that millisecond, and above every earlier one', () => {
+    for (let i = 0; i < 50; i++) {
+      expect(cursorAt(NOW) <= newEventId(NOW)).toBe(true);
+      expect(newEventId(NOW - 1) < cursorAt(NOW)).toBe(true);
+    }
+  });
+
+  it('rounds a fractional time down', () => {
+    expect(cursorAt(NOW + 0.9)).toBe(cursorAt(NOW));
+  });
+
+  it('throws on a time a ULID cannot hold', () => {
+    for (const bad of [-1, 2 ** 48, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => cursorAt(bad)).toThrow(RangeError);
+    }
   });
 });
 

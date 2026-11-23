@@ -12,7 +12,7 @@ export {
   type Validation,
 } from './envelope';
 export { validateDraft, type CatchUpResult, type EventsHub, type PublishResult } from './hub';
-export { newEventId } from './id';
+export { cursorAt, newEventId } from './id';
 export {
   DEFAULT_TOLERANCE_SECONDS,
   HEADER,
