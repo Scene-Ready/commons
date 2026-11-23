@@ -5,6 +5,7 @@ import {
   listRejected,
   OUTBOX_SCHEMA_VERSION,
   outboxStatements,
+  resendRejected,
   sendPending,
   sweepOutbox,
 } from '../../src/outbox';
@@ -178,6 +179,27 @@ describe('a rejected event', () => {
     expect(await sweptAt(NOW + 10 * MINUTE)).toEqual([pending.id]);
     expect(await listRejected(env.DB)).toMatchObject([{ id: rejected.id }]);
   });
+
+  it('is sent by the next sweep once resent', async () => {
+    const [event] = await commit(draft());
+    await sendPending(env.DB, fakeHub(refuse).hub, [event], { now: NOW });
+    const later = NOW + 60 * MINUTE;
+
+    expect(await resendRejected(env.DB, event.id, { now: later })).toBe(true);
+    expect(await listRejected(env.DB)).toEqual([]);
+    expect(await sweptAt(later)).toEqual([event.id]);
+  });
+
+  it('can’t be resent by an unknown or unrejected id', async () => {
+    const [rejected, pending] = await commit(draft(), draft());
+    await sendPending(env.DB, fakeHub(refuse).hub, [rejected], { now: NOW });
+
+    expect(await resendRejected(env.DB, newEventId(NOW), { now: NOW })).toBe(false);
+    expect(await resendRejected(env.DB, pending.id, { now: NOW })).toBe(false);
+    // The pending row is still due a minute after commit, not now.
+    expect(await sweptAt(NOW)).toEqual([]);
+    expect(await listRejected(env.DB)).toMatchObject([{ id: rejected.id, errors }]);
+  });
 });
 
 describe('an event the Hub does not acknowledge', () => {
@@ -209,6 +231,21 @@ describe('an event the Hub does not acknowledge', () => {
 
     expect(await sweptAt(NOW + 23_000)).toEqual([]);
     expect(await sweptAt(NOW + 37_000)).toEqual([event.id]);
+  });
+
+  it('warns when sent without a committed row', async () => {
+    const uncommitted = draft();
+
+    expect(await sendPending(env.DB, fakeHub(down).hub, [uncommitted], { now: NOW })).toEqual({
+      sent: [],
+      duplicate: [],
+      rejected: [],
+      failed: [{ id: uncommitted.id, error: 'Network connection lost.', stuck: false }],
+    });
+    expect(logged.warn).toHaveBeenCalledWith(
+      'outbox: no outbox row for this event; was the batch committed?',
+      expect.objectContaining({ id: uncommitted.id, type: uncommitted.type }),
+    );
   });
 
   it('keeps one failure from stopping the others', async () => {

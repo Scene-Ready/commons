@@ -25,9 +25,12 @@ export interface SendResult {
   sent: string[];
   /** Acknowledged as already published (a subset of `sent`). */
   duplicate: string[];
-  /** Refused by the Hub. Their rows are kept, marked rejected, and never sent again. */
+  /** Refused by the Hub. Kept and marked rejected; not sent again unless `resendRejected`. */
   rejected: { id: string; errors: string[] }[];
-  /** Still in the outbox: the binding threw, or D1 did. The sweep sends them again. */
+  /**
+   * The binding threw, or D1 did. The sweep sends them again, unless the event
+   * had no outbox row (logged as a warning): then nothing will.
+   */
   failed: { id: string; error: string; stuck: boolean }[];
 }
 
@@ -75,9 +78,11 @@ export function outboxStatements<Statement>(
 
 /**
  * Sends events just committed with `outboxStatements`. Pass the drafts you
- * already hold, and call it inside `ctx.waitUntil` after the batch commits so
- * the request never waits on the Hub. Each event is its own `publish` call,
- * all at once. Never throws; whatever isn't acknowledged stays for the sweep.
+ * already hold, and call it inside `ctx.waitUntil` once `await db.batch(...)`
+ * has resolved, never in a `finally` or a `catch`: it doesn't read the rows
+ * back, so it would publish an event whose change rolled back. Each event is
+ * its own `publish` call, all at once. Never throws; whatever isn't
+ * acknowledged stays for the sweep.
  */
 export async function sendPending(
   db: D1DatabaseLike,
@@ -191,10 +196,19 @@ async function recordFailure(
     )
     .bind(attempts, error, nextAttemptAt(attempts, now), id, row.attempts)
     .all();
-  const stuck = results.length > 0 && attempts >= STUCK_AFTER_ATTEMPTS;
+  const recorded = results.length > 0;
+  const stuck = recorded && attempts >= STUCK_AFTER_ATTEMPTS;
   const log = { id, type, attempts, error };
-  if (stuck) console.error('outbox: event stuck, the Hub has not acknowledged it', log);
-  else console.warn('outbox: send failed, will try again', log);
+  // A row that has never failed and is gone usually means `sendPending` was
+  // called for a batch that never committed, so nothing will send it again.
+  // (A concurrent ack or rejection can also remove it; the warning says "was".)
+  if (!recorded && row.attempts === 0) {
+    console.warn('outbox: no outbox row for this event; was the batch committed?', log);
+  } else if (stuck) {
+    console.error('outbox: event stuck, the Hub has not acknowledged it', log);
+  } else {
+    console.warn('outbox: send failed, will try again', log);
+  }
   return { id, error, stuck };
 }
 
@@ -206,7 +220,30 @@ function decodeDraft(body: string): EventDraft {
   return JSON.parse(body) as EventDraft;
 }
 
-/** An event the Hub refused. Fix the publisher, then delete the row by hand. */
+/**
+ * Puts a rejected event back in line: clears its rejection and makes it due at
+ * `now`, so the next sweep sends it. Call it once the cause is fixed outside
+ * the publisher (the Hub upgraded, the binding corrected); nothing calls it
+ * automatically. Returns false, changing nothing, if no rejected row has `id`.
+ * The row keeps its count of failed Attempts, so one that failed often before
+ * its rejection is reported stuck sooner.
+ */
+export async function resendRejected(
+  db: D1DatabaseLike,
+  id: string,
+  options: { now?: number } = {},
+): Promise<boolean> {
+  const { results } = await db
+    .prepare(
+      `UPDATE outbox_event SET rejected_at = NULL, errors = NULL, next_attempt_at = ?
+       WHERE id = ? AND rejected_at IS NOT NULL RETURNING id`,
+    )
+    .bind(options.now ?? Date.now(), id)
+    .all();
+  return results.length > 0;
+}
+
+/** An event the Hub refused. Fix the cause, then delete the row or `resendRejected` it. */
 export interface RejectedEvent {
   id: string;
   draft: EventDraft;

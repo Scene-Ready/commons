@@ -1,6 +1,10 @@
 import { validateEvent, type EventDraft, type EventEnvelope, type Validation } from './envelope';
 
-/** What the Hub answers a `publish` with. `ok: true` means the event is in its log. */
+/**
+ * What the Hub answers a `publish` with. `ok: true` means the event is in its
+ * log. `ok: false` is permanent: the publisher keeps the event as rejected and
+ * never retries it on its own.
+ */
 export type PublishResult =
   | { ok: true; id: string; duplicate: boolean; deliveries: number }
   | { ok: false; errors: string[] };
@@ -15,7 +19,12 @@ export type CatchUpResult =
  * takes the publishing App from the binding's props, never from the event.
  */
 export interface EventsHub {
-  /** Accepts an event. A repeated id is acknowledged as a duplicate and changes nothing. */
+  /**
+   * Accepts an event. A repeated id is acknowledged as a duplicate and changes
+   * nothing. Answers `ok: false` only for a draft that fails `validateDraft`, or
+   * for an App the Hub can't identify; any other failure, such as its own
+   * storage being unavailable, throws, so the publisher tries again.
+   */
   publish(draft: EventDraft): Promise<PublishResult>;
   /** The events the App's Subscription would have received after `cursor`, oldest first. */
   catchUp(options?: { cursor?: string; limit?: number }): Promise<CatchUpResult>;
