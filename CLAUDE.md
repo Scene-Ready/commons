@@ -25,6 +25,8 @@ docs/adr/               decisions
 
 ## Agent skills
 
+The shared engineering skills (`mattpocock/skills`) live once in [`Scene-Ready/home`](https://github.com/Scene-Ready/home). Start agent sessions there, or attach `home` alongside this repo; this repo's `docs/agents/` still configures them for work here.
+
 ### Issue tracker
 
 Issues live in GitHub Issues on `Scene-Ready/commons`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
