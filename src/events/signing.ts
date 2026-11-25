@@ -54,9 +54,21 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-/** The `X-SR-Signature` value for a body, signed with a derived key at `timestamp` (Unix seconds). */
-export async function signBody(key: string, body: string, timestamp: number): Promise<string> {
-  return `t=${timestamp},v1=${await hmac(key, `v1:${timestamp}:${body}`)}`;
+/**
+ * The `X-SR-Signature` value for a body, signed with a derived key at
+ * `timestamp` (Unix seconds). While a secret rotates, pass `[newKey, oldKey]`:
+ * the header carries a `v1` for each, the old one last (ADR-0007), so
+ * subscribers on older commons, which read the last `v1`, still verify.
+ */
+export async function signBody(
+  key: string | readonly [newKey: string, oldKey: string],
+  body: string,
+  timestamp: number,
+): Promise<string> {
+  const keys = typeof key === 'string' ? [key] : key;
+  const message = `v1:${timestamp}:${body}`;
+  const signatures = await Promise.all(keys.map((k) => hmac(k, message)));
+  return [`t=${timestamp}`, ...signatures.map((s) => `v1=${s}`)].join(',');
 }
 
 export type VerifyResult =
@@ -69,7 +81,9 @@ export type VerifyResult =
 
 /**
  * Verifies a delivery and parses its event. Pass the raw body text, read once,
- * before any JSON parsing: re-serialized JSON will not verify.
+ * before any JSON parsing: re-serialized JSON will not verify. The delivery
+ * verifies if any of its `v1` signatures matches `secret`, so a subscriber
+ * holding either secret verifies while one rotates (ADR-0007).
  */
 export async function verifyDelivery(
   input: { headers: Headers; body: string },
@@ -85,17 +99,20 @@ export async function verifyDelivery(
     return { ok: false, reason: 'stale' };
   }
 
-  const parts = Object.fromEntries(
-    sig.split(',').map((kv) => {
-      const i = kv.indexOf('=');
-      return [kv.slice(0, i).trim(), kv.slice(i + 1).trim()];
-    }),
-  );
-  if (parts.t !== ts || typeof parts.v1 !== 'string') return { ok: false, reason: 'bad_signature' };
+  let t: string | undefined;
+  const v1: string[] = [];
+  for (const kv of sig.split(',')) {
+    const i = kv.indexOf('=');
+    const name = kv.slice(0, i).trim();
+    const value = kv.slice(i + 1).trim();
+    if (name === 't') t = value;
+    else if (name === 'v1') v1.push(value);
+  }
+  if (t !== ts || v1.length === 0) return { ok: false, reason: 'bad_signature' };
 
   const key = await signingKey(options.secret);
   const expected = await hmac(key, `v1:${ts}:${input.body}`);
-  if (!timingSafeEqual(expected, parts.v1)) return { ok: false, reason: 'bad_signature' };
+  if (!v1.some((s) => timingSafeEqual(expected, s))) return { ok: false, reason: 'bad_signature' };
 
   let parsed: unknown;
   try {
