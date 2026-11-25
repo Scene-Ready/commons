@@ -1,7 +1,7 @@
 {
   "name": "@scene-ready/commons",
-  "version": "0.6.0",
-  "description": "Shared code for Scene Ready apps: cross-app references, the event standard and outbox, branded QR codes.",
+  "version": "0.7.0",
+  "description": "Shared code for Scene Ready apps: cross-app references, the event standard and outbox, branded QR codes, the notifications contract.",
   "private": true,
   "license": "UNLICENSED",
   "type": "module",
@@ -29,6 +29,10 @@
     "./outbox": {
       "types": "./dist/outbox/index.d.ts",
       "default": "./dist/outbox/index.js"
+    },
+    "./notifications": {
+      "types": "./dist/notifications/index.d.ts",
+      "default": "./dist/notifications/index.js"
     },
     "./package.json": "./package.json"
   },
