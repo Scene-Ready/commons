@@ -2,6 +2,11 @@
 
 Grouped by entry point. Versions follow semver across the whole package.
 
+## 0.8.0 — 2026-11-25
+
+- `events`: `X-SR-Signature` may carry several `v1` signatures, so a subscription's secret can rotate without a gap (ADR-0007). `verifyDelivery` accepts a delivery if any `v1` matches its `secret`, and refuses a header with more than two. `signBody` takes `[newKey, oldKey]` during an overlap and puts the old key's signature last.
+- **Upgrade order:** a subscriber must be on 0.8.0 before it switches to a new secret during an overlap; older releases read only the last `v1`, the old key's.
+
 ## 0.7.0 — 2026-11-25
 
 - `notifications`: New entry point, the notifications Worker as apps see it over their `NOTIFY` service binding. `Notify.sendEmail(input)` sends a transactional email; apps send content (`MessageContent` or `AlertContent`, matching design-system's `wrapSimpleMessage` and `wrapIncidentAlert`), never HTML, and get a `SendResult`. `validateEmailInput(input)` checks an email as notifications will on receipt and returns only the fields the contract defines.

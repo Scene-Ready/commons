@@ -228,6 +228,62 @@ describe('signed delivery', () => {
     });
   });
 
+  describe('during a rotation, signed with the new key and the old', () => {
+    const body = JSON.stringify(event());
+    const ts = NOW / 1000;
+
+    async function rotatedDelivery(keys: readonly [string, string]) {
+      return {
+        headers: new Headers({
+          [HEADER.timestamp]: String(ts),
+          [HEADER.signature]: await signBody(keys, body, ts),
+        }),
+        body,
+      };
+    }
+
+    it.each([
+      ['the new', 'subscription-secret', 'old-secret'],
+      ['the old', 'new-secret', 'subscription-secret'],
+    ])('verifies a subscriber holding %s secret', async (_, newSecret, oldSecret) => {
+      const d = await rotatedDelivery([await signingKey(newSecret), await signingKey(oldSecret)]);
+      expect(await verifyDelivery(d, { secret, now: NOW })).toMatchObject({ ok: true });
+    });
+
+    it('refuses a subscriber holding neither', async () => {
+      const d = await rotatedDelivery([
+        await signingKey('new-secret'),
+        await signingKey('old-secret'),
+      ]);
+      expect(await verifyDelivery(d, { secret, now: NOW })).toMatchObject({
+        reason: 'bad_signature',
+      });
+    });
+
+    it('refuses a header with more than two v1 signatures', async () => {
+      const d = await rotatedDelivery([await signingKey(secret), await signingKey('old-secret')]);
+      const sig = d.headers.get(HEADER.signature) ?? '';
+      d.headers.set(HEADER.signature, `${sig},v1=${'0'.repeat(64)}`);
+      expect(await verifyDelivery(d, { secret, now: NOW })).toMatchObject({
+        reason: 'bad_signature',
+      });
+    });
+
+    it('skips a segment without "=" instead of reading it as t', async () => {
+      const d = await delivery(body, ts);
+      d.headers.set(HEADER.signature, `${d.headers.get(HEADER.signature)},tt`);
+      expect(await verifyDelivery(d, { secret, now: NOW })).toMatchObject({ ok: true });
+    });
+
+    it('puts the old signature last, for subscribers that read the last v1', async () => {
+      const [newKey, oldKey] = [await signingKey('new-secret'), await signingKey(secret)];
+      const both = await signBody([newKey, oldKey], body, ts);
+      const lastV1 = both.split(',').at(-1);
+      expect(both).toBe(`${await signBody(newKey, body, ts)},${lastV1}`);
+      expect(`t=${ts},${lastV1}`).toBe(await signBody(oldKey, body, ts));
+    });
+  });
+
   it('ignores an attribute it does not know and leaves it out of the event', async () => {
     const e = event();
     const body = JSON.stringify({ ...e, traceparent: '00-abc-def-01' });

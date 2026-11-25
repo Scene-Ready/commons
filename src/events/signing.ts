@@ -36,6 +36,32 @@ export async function signingKey(secret: string): Promise<string> {
   return base64url(new Uint8Array(digest));
 }
 
+/** The text a `v1` signature covers. Signing and verifying both build it here. */
+function signedMessage(timestamp: number | string, body: string): string {
+  return `v1:${timestamp}:${body}`;
+}
+
+/** At most two `v1` signatures: the new key's and the old one's during a rotation (ADR-0007). */
+const MAX_V1_SIGNATURES = 2;
+
+/**
+ * Parses an `X-SR-Signature` value, `t=<timestamp>,v1=<hex>[,v1=<hex>]`.
+ * A segment without `=` is skipped; a repeated `t` is last-wins.
+ */
+function parseSignatureHeader(header: string): { t?: string; v1: string[] } {
+  let t: string | undefined;
+  const v1: string[] = [];
+  for (const segment of header.split(',')) {
+    const i = segment.indexOf('=');
+    if (i < 0) continue;
+    const name = segment.slice(0, i).trim();
+    const value = segment.slice(i + 1).trim();
+    if (name === 't') t = value;
+    else if (name === 'v1') v1.push(value);
+  }
+  return { t, v1 };
+}
+
 async function hmac(key: string, message: string): Promise<string> {
   const k = await crypto.subtle.importKey(
     'raw',
@@ -54,9 +80,22 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-/** The `X-SR-Signature` value for a body, signed with a derived key at `timestamp` (Unix seconds). */
-export async function signBody(key: string, body: string, timestamp: number): Promise<string> {
-  return `t=${timestamp},v1=${await hmac(key, `v1:${timestamp}:${body}`)}`;
+/**
+ * The `X-SR-Signature` value for a body, signed with one derived key at
+ * `timestamp` (Unix seconds). While a secret rotates, pass `[newKey, oldKey]`:
+ * the header carries a `v1` for each, the old one last (ADR-0007), so
+ * subscribers on older commons, which read the last `v1`, still verify.
+ */
+export async function signBody(
+  keys: string | readonly [newKey: string, oldKey: string],
+  body: string,
+  timestamp: number,
+): Promise<string> {
+  const message = signedMessage(timestamp, body);
+  const signatures = await Promise.all(
+    (typeof keys === 'string' ? [keys] : keys).map((k) => hmac(k, message)),
+  );
+  return [`t=${timestamp}`, ...signatures.map((s) => `v1=${s}`)].join(',');
 }
 
 export type VerifyResult =
@@ -69,7 +108,9 @@ export type VerifyResult =
 
 /**
  * Verifies a delivery and parses its event. Pass the raw body text, read once,
- * before any JSON parsing: re-serialized JSON will not verify.
+ * before any JSON parsing: re-serialized JSON will not verify. The delivery
+ * verifies if any of its `v1` signatures (one or two) matches `secret`, so a
+ * subscriber holding either secret verifies while one rotates (ADR-0007).
  */
 export async function verifyDelivery(
   input: { headers: Headers; body: string },
@@ -85,17 +126,14 @@ export async function verifyDelivery(
     return { ok: false, reason: 'stale' };
   }
 
-  const parts = Object.fromEntries(
-    sig.split(',').map((kv) => {
-      const i = kv.indexOf('=');
-      return [kv.slice(0, i).trim(), kv.slice(i + 1).trim()];
-    }),
-  );
-  if (parts.t !== ts || typeof parts.v1 !== 'string') return { ok: false, reason: 'bad_signature' };
+  const { t, v1 } = parseSignatureHeader(sig);
+  if (t !== ts || v1.length === 0 || v1.length > MAX_V1_SIGNATURES) {
+    return { ok: false, reason: 'bad_signature' };
+  }
 
   const key = await signingKey(options.secret);
-  const expected = await hmac(key, `v1:${ts}:${input.body}`);
-  if (!timingSafeEqual(expected, parts.v1)) return { ok: false, reason: 'bad_signature' };
+  const expected = await hmac(key, signedMessage(ts, input.body));
+  if (!v1.some((s) => timingSafeEqual(expected, s))) return { ok: false, reason: 'bad_signature' };
 
   let parsed: unknown;
   try {
