@@ -2,6 +2,11 @@
 
 Grouped by entry point. Versions follow semver across the whole package.
 
+## 0.7.0 — 2026-11-25
+
+- `notifications`: New entry point, the notifications Worker as apps see it over their `NOTIFY` service binding. `Notify.sendEmail(input)` sends a transactional email; apps send content (`MessageContent` or `AlertContent`, matching design-system's `wrapSimpleMessage` and `wrapIncidentAlert`), never HTML, and get a `SendResult`. `validateEmailInput(input)` checks an email as notifications will on receipt and returns only the fields the contract defines.
+- ADR-0001: the email wrappers stay in design-system; the planned `email` entry point is dropped.
+
 ## 0.6.0 — 2026-11-23
 
 - `outbox`: `STUCK_AFTER_ATTEMPTS` (8), the failed Attempt from which the outbox logs a row as stuck, is exported.

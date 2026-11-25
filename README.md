@@ -1,14 +1,15 @@
 # @scene-ready/commons
 
-Shared code for Scene Ready apps: cross-app references, the event standard and its outbox, and branded QR codes. One package with an entry point per module, so each app imports only what it uses.
+Shared code for Scene Ready apps: cross-app references, the event standard and its outbox, branded QR codes, and the notifications contract. One package with an entry point per module, so each app imports only what it uses.
 
-| Entry point                     | What it holds                                                                                                                                         | Runs in       |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
-| `@scene-ready/commons/refs`     | `sr:<app>:<type>:<id>` references: `parseRef`, `formatRef`, `isRef`                                                                                   | anywhere      |
-| `@scene-ready/commons/events`   | The event envelope, `validateEvent`, `validateDraft`, `newEventId`, `cursorAt`, the Hub's interface (`EventsHub`), signed delivery (`verifyDelivery`) | Workers, Node |
-| `@scene-ready/commons/outbox`   | The publisher's transactional outbox on D1: `outboxStatements`, `sendPending`, `sweepOutbox`, `resendRejected`, `listRejected`, `listStuck`           | Workers       |
-| `@scene-ready/commons/qr`       | Branded QR codes as data or a standalone SVG string (`brandedQrSvg`)                                                                                  | anywhere      |
-| `@scene-ready/commons/qr/react` | `<QrCode>` for React apps                                                                                                                             | browser, SSR  |
+| Entry point                          | What it holds                                                                                                                                         | Runs in       |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| `@scene-ready/commons/refs`          | `sr:<app>:<type>:<id>` references: `parseRef`, `formatRef`, `isRef`                                                                                   | anywhere      |
+| `@scene-ready/commons/events`        | The event envelope, `validateEvent`, `validateDraft`, `newEventId`, `cursorAt`, the Hub's interface (`EventsHub`), signed delivery (`verifyDelivery`) | Workers, Node |
+| `@scene-ready/commons/outbox`        | The publisher's transactional outbox on D1: `outboxStatements`, `sendPending`, `sweepOutbox`, `resendRejected`, `listRejected`, `listStuck`           | Workers       |
+| `@scene-ready/commons/qr`            | Branded QR codes as data or a standalone SVG string (`brandedQrSvg`)                                                                                  | anywhere      |
+| `@scene-ready/commons/notifications` | The notifications Worker as apps see it over `NOTIFY`: `sendEmail` (`Notify`, `EmailInput`, `SendResult`) and `validateEmailInput`                    | anywhere      |
+| `@scene-ready/commons/qr/react`      | `<QrCode>` for React apps                                                                                                                             | browser, SSR  |
 
 The standards these modules enforce are in [`docs/contracts/`](docs/contracts/): the [API standard](docs/contracts/api-standard.md) and the [event standard](docs/contracts/event-standard.md). The overall design is the doc **Scene Ready — Cross-App Data Sharing Standard**.
 
@@ -81,7 +82,7 @@ None of these throws because of the Hub. A rejected event stays in `outbox_event
 
 A module belongs in commons when **two or more apps use it**, it holds **no app's domain logic**, and it holds **no state of its own** (a table it defines is the app's, in the app's database, migrated by the app; [ADR-0005](docs/adr/0005-modules-may-define-app-owned-tables.md)). Each app keeps its own bindings, secrets and configuration; nothing here reads an environment variable. Everything else stays in the app.
 
-Planned next, each behind its own entry point: `m2m` (client-credentials tokens and API errors), `outbox/do` (the outbox for Durable Objects), `email` (email wrappers moved from `design-system`, plus sending through a `send_email` binding) and `feedback` (the feedback server helper, with the dialog at `feedback/react`, per the feedback repo's spec 002).
+Planned next, each behind its own entry point: `m2m` (client-credentials tokens and API errors), `outbox/do` (the outbox for Durable Objects) and `feedback` (the feedback server helper, with the dialog at `feedback/react`, per the feedback repo's spec 002).
 
 ## Develop
 
