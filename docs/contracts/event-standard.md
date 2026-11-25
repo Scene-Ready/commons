@@ -77,7 +77,7 @@ Each subscription has an HTTPS endpoint and a secret. The Hub POSTs the envelope
 
 The signature is auth's webhook scheme ([ADR-0004](../adr/0004-deliveries-signed-with-auths-webhook-scheme.md)): `v1 = hex(HMAC-SHA256(key, "v1:" + timestamp + ":" + raw_body))`, where `key` is the text of `base64url(SHA-256(secret))`. Subscribers verify with `verifyDelivery`, reject timestamps more than 300 seconds off, and must read the raw body before parsing.
 
-While a subscription's secret rotates, the Hub signs each Attempt with both keys ([ADR-0007](../adr/0007-rotation-by-dual-signatures.md)): `t=<timestamp>,v1=<new>,v1=<old>`, the new key's signature first and the old one **last**, and drops the old one when the overlap ends. `signBody(key, body, timestamp)` builds the header; pass `[newKey, oldKey]` during an overlap. A delivery verifies if **any** `v1` matches. Commons before 0.8.0 reads only the last `v1`, which is the old key's, so **upgrade commons before you switch to a new secret during an overlap**.
+While a subscription's secret rotates, the Hub signs each Attempt with both keys ([ADR-0007](../adr/0007-rotation-by-dual-signatures.md)): `t=<timestamp>,v1=<new>,v1=<old>`, the new key's signature first and the old one **last**, and drops the old one when the overlap ends. `signBody(key, body, timestamp)` builds the header; pass `[newKey, oldKey]` during an overlap. A header carries one or two `v1` signatures, never more, and a delivery verifies if **any** of them matches. Commons before 0.8.0 reads only the last `v1`, which is the old key's, so **upgrade commons before you switch to a new secret during an overlap**.
 
 Any 2xx is success. Anything else is retried or permanent, by this policy:
 

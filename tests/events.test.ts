@@ -232,7 +232,7 @@ describe('signed delivery', () => {
     const body = JSON.stringify(event());
     const ts = NOW / 1000;
 
-    async function rotated(keys: readonly [string, string]) {
+    async function rotatedDelivery(keys: readonly [string, string]) {
       return {
         headers: new Headers({
           [HEADER.timestamp]: String(ts),
@@ -246,15 +246,33 @@ describe('signed delivery', () => {
       ['the new', 'subscription-secret', 'old-secret'],
       ['the old', 'new-secret', 'subscription-secret'],
     ])('verifies a subscriber holding %s secret', async (_, newSecret, oldSecret) => {
-      const d = await rotated([await signingKey(newSecret), await signingKey(oldSecret)]);
+      const d = await rotatedDelivery([await signingKey(newSecret), await signingKey(oldSecret)]);
       expect(await verifyDelivery(d, { secret, now: NOW })).toMatchObject({ ok: true });
     });
 
     it('refuses a subscriber holding neither', async () => {
-      const d = await rotated([await signingKey('new-secret'), await signingKey('old-secret')]);
+      const d = await rotatedDelivery([
+        await signingKey('new-secret'),
+        await signingKey('old-secret'),
+      ]);
       expect(await verifyDelivery(d, { secret, now: NOW })).toMatchObject({
         reason: 'bad_signature',
       });
+    });
+
+    it('refuses a header with more than two v1 signatures', async () => {
+      const d = await rotatedDelivery([await signingKey(secret), await signingKey('old-secret')]);
+      const sig = d.headers.get(HEADER.signature) ?? '';
+      d.headers.set(HEADER.signature, `${sig},v1=${'0'.repeat(64)}`);
+      expect(await verifyDelivery(d, { secret, now: NOW })).toMatchObject({
+        reason: 'bad_signature',
+      });
+    });
+
+    it('skips a segment without "=" instead of reading it as t', async () => {
+      const d = await delivery(body, ts);
+      d.headers.set(HEADER.signature, `${d.headers.get(HEADER.signature)},tt`);
+      expect(await verifyDelivery(d, { secret, now: NOW })).toMatchObject({ ok: true });
     });
 
     it('puts the old signature last, for subscribers that read the last v1', async () => {
