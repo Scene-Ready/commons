@@ -19,9 +19,15 @@ How one Scene Ready app calls another. Each app owns its API and its resources, 
 
 ## Acting user
 
-- A call made for a person carries that user's auth id in `Scene-Ready-Acting-User`; the receiving app applies that user's role from its own schema.
-- A call made by the app itself (a webhook handler, a job) omits it and is limited to what the scope allows.
-- Status: proposed (decision D2 in the design doc).
+Decision D2 in the design doc.
+
+- A call made for a person carries that user's auth id in `Scene-Ready-Acting-User`, beside the calling app's client-credentials token. The receiving app applies that user's role from its own schema.
+- A call made by the app itself (a webhook handler, a job, an app pulling organization details from auth) uses the app's own token, limited to its scopes, with no acting user.
+- Token exchange for user tokens ([RFC 8693](https://www.rfc-editor.org/rfc/rfc8693)) is not planned.
+
+## Documentation
+
+Each app documents the APIs it owns in its own repo, beside the event types it publishes. There is no shared catalog until there is a public API (decision D5 in the design doc).
 
 ## Versions
 

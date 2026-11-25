@@ -35,10 +35,18 @@ CloudEvents 1.0 attribute names, plus `orgid` and `actor`. Types and validation 
 
 - **Hints, not state.** A subscriber that needs details calls the owner's API with its own token, so access rules apply at read time.
 - **At least once, any order.** Subscribers dedupe by `id`, and compare against the state they refetch when order matters.
-- **Owned types.** Each type is documented in its source app's repo beside its API. A breaking change is a new major version (`.v2`), published alongside the old one until subscribers move.
+- **Owned types.** Each type is documented in its source app's repo (see [Documentation](#documentation)). A breaking change is a new major version (`.v2`), published alongside the old one until subscribers move.
 - **Owned subjects.** An app publishes events only about records it owns: the `subject` reference names the `source` app.
 - **One spelling.** App keys use lowercase letters, digits and single hyphens (`rig-prep`); Record types and verbs are snake_case (`corrective_action`, `closed`). References use the same rules, per [ADR-0003](../adr/0003-references-are-sr-strings.md).
 - **Strict in, lenient out.** The Hub rejects a published event with an attribute this standard does not define. Subscribers ignore attributes they do not know, so the envelope can gain optional attributes without a new major version.
+
+## Environments
+
+Dev and prod never exchange events (decision D6 in the design doc). A dev app publishes to and subscribes through only the dev Hub, and a prod app only the prod Hub. A subscription's endpoint is in the same environment as its Hub.
+
+## Documentation
+
+Each app documents the event types it owns in its own repo, beside its API. There is no shared catalog until there is a public API (decision D5 in the design doc).
 
 ## Publishing
 
