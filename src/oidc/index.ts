@@ -5,11 +5,12 @@
  *
  * Built on oauth4webapi (protocol) and jose (ID-token signature): oauth4webapi
  * checks the ID token's claims on a token-endpoint response but not its
- * signature, so `finishSignIn` verifies it with jose against the cached JWKS.
+ * signature, so `finishSignIn` and `refresh` verify it with jose against the
+ * cached JWKS.
  */
 import * as oauth from 'oauth4webapi';
 import { createRemoteJWKSet, customFetch as joseFetch, errors, jwtVerify } from 'jose';
-import { parseIdentity, type TokenSet } from './claims';
+import { parseIdentity, type Identity, type TokenSet } from './claims';
 
 export * from './claims';
 
@@ -47,6 +48,23 @@ export type FinishSignInResult =
   | { ok: false; reason: 'not_signed_in'; returnTo: string }
   | { ok: false; reason: 'invalid' | 'denied' | 'unavailable' };
 
+export type RefreshResult =
+  | { ok: true; tokens: TokenSet }
+  | { ok: false; reason: 'not_signed_in' | 'invalid' | 'unavailable' }
+  /** The new ID token's Active Org differs from the old; null when it has none. */
+  | { ok: false; reason: 'org_changed'; activeOrgId: string | null };
+
+export type UserInfoResult =
+  | { ok: true; identity: Identity }
+  | { ok: false; reason: 'not_signed_in' | 'invalid' | 'unavailable' };
+
+export type SetActiveOrganizationResult =
+  { ok: true } | { ok: false; reason: 'not_member' | 'not_signed_in' | 'unavailable' };
+
+export type RevokeResult = { ok: true } | { ok: false; reason: 'unavailable' };
+
+export type EndSessionUrlResult = { ok: true; url: string } | { ok: false; reason: 'unavailable' };
+
 export interface OidcClient {
   /**
    * The authorize URL to send the browser to, and the pending sign-in to keep
@@ -59,7 +77,41 @@ export interface OidcClient {
    * and verifies the ID token (signature, issuer, audience, expiry, nonce).
    */
   finishSignIn(callbackUrl: string | URL, pending: PendingSignIn): Promise<FinishSignInResult>;
+  /**
+   * A new `TokenSet` from the refresh token. It never moves a session to
+   * another org: when the new ID token's Active Org differs from the old one it
+   * answers `org_changed` and no tokens, and the app runs Org follow.
+   */
+  refresh(tokens: TokenSet): Promise<RefreshResult>;
+  /** Whether the access token expires within `skewMs` of `now` (epoch ms). */
+  isExpiring(tokens: Pick<TokenSet, 'accessExpiresAt'>, now: number, skewMs?: number): boolean;
+  /**
+   * The user's claims from userinfo: the Org-follow check (home ADR 0002). When
+   * the org is unchanged, they replace `TokenSet.claims`; check first that
+   * `identity.subject` is the session's user (OIDC Core 5.3.2).
+   */
+  userInfo(accessToken: string): Promise<UserInfoResult>;
+  /**
+   * Sets the user's Active Org in auth, user-wide (every app the user has open
+   * follows). `not_member` is auth's 404. Throws when the token lacks the
+   * `organizations` scope (auth's 403): the app asked for the wrong scopes.
+   */
+  setActiveOrganization(accessToken: string, orgId: string): Promise<SetActiveOrganizationResult>;
+  /**
+   * The URL of auth's end-session endpoint, to send the browser to after the
+   * app's own sign-out. `unavailable` when discovery can't be fetched.
+   */
+  endSessionUrl(options: {
+    idToken: string;
+    postLogoutRedirectUri: string;
+    /** Echoed back on the redirect, for the app's CSRF check. */
+    state?: string;
+  }): Promise<EndSessionUrlResult>;
+  /** Revokes a refresh token. A failure must not block sign-out: this never throws. */
+  revoke(refreshToken: string): Promise<RevokeResult>;
 }
+
+type JWKS = ReturnType<typeof createRemoteJWKSet>;
 
 /** A pending sign-in older than this is `invalid`. */
 const PENDING_MAX_AGE_MS = 10 * 60_000;
@@ -80,12 +132,15 @@ export function createOidcClient(config: OidcClientConfig): OidcClient {
   const fetch = settings.fetch;
   const client: oauth.Client = { client_id: clientId };
   const clientAuth = oauth.ClientSecretBasic(settings.clientSecret);
+  // auth's Organizations API sits on its origin, outside the issuer path, and
+  // isn't in discovery (auth integration guide §11b).
+  const activeOrgEndpoint = new URL('/api/oidc/organizations/active', issuer);
 
   /** Discovery and JWKS, cached for the isolate's lifetime once discovery succeeds. */
   let metadata: Promise<{
     as: oauth.AuthorizationServer;
     authorizationEndpoint: string;
-    jwks: ReturnType<typeof createRemoteJWKSet>;
+    jwks: JWKS;
   }> | null = null;
 
   /** Throws on any failure; callers answer `unavailable`. */
@@ -111,15 +166,20 @@ export function createOidcClient(config: OidcClientConfig): OidcClient {
     return metadata;
   }
 
+  /** Discovery, or null when it can't be fetched: callers answer `unavailable`. */
+  async function discovered() {
+    try {
+      return await discover();
+    } catch {
+      return null;
+    }
+  }
+
   return {
     async startSignIn({ returnTo, silent = false }) {
       checkReturnTo(returnTo);
-      let authorizationEndpoint: string;
-      try {
-        ({ authorizationEndpoint } = await discover());
-      } catch {
-        return { ok: false, reason: 'unavailable' };
-      }
+      const found = await discovered();
+      if (!found) return { ok: false, reason: 'unavailable' };
       const pending: PendingSignIn = {
         state: oauth.generateRandomState(),
         nonce: oauth.generateRandomNonce(),
@@ -128,7 +188,7 @@ export function createOidcClient(config: OidcClientConfig): OidcClient {
         silent,
         createdAt: Date.now(),
       };
-      const url = new URL(authorizationEndpoint);
+      const url = new URL(found.authorizationEndpoint);
       const q = url.searchParams;
       q.set('response_type', 'code');
       q.set('client_id', clientId);
@@ -149,12 +209,8 @@ export function createOidcClient(config: OidcClientConfig): OidcClient {
       if (!(age >= 0 && age <= PENDING_MAX_AGE_MS)) {
         return { ok: false, reason: 'invalid' };
       }
-      let found: Awaited<ReturnType<typeof discover>>;
-      try {
-        found = await discover();
-      } catch {
-        return { ok: false, reason: 'unavailable' };
-      }
+      const found = await discovered();
+      if (!found) return { ok: false, reason: 'unavailable' };
       const { as, jwks } = found;
 
       let params: URLSearchParams;
@@ -199,44 +255,218 @@ export function createOidcClient(config: OidcClientConfig): OidcClient {
           expectedNonce: pending.nonce,
           requireIdToken: true,
         });
-      } catch {
-        return { ok: false, reason: 'invalid' };
-      }
-
-      // oauth4webapi checked the claims but not the signature. jose checks both, and the
-      // nonce is checked again below, so verification doesn't rest on one library.
-      let payload: Record<string, unknown>;
-      try {
-        ({ payload } = await jwtVerify(body.id_token!, jwks, {
-          issuer: as.issuer,
-          audience: clientId,
-          clockTolerance: CLOCK_TOLERANCE_S,
-        }));
       } catch (error) {
-        return { ok: false, reason: jwksUnreachable(error) ? 'unavailable' : 'invalid' };
-      }
-      if (payload.nonce !== pending.nonce) return { ok: false, reason: 'invalid' };
-
-      const now = Date.now();
-      let claims: TokenSet['claims'];
-      try {
-        claims = parseIdentity(payload);
-      } catch {
+        throwIfClientRefused(error);
         return { ok: false, reason: 'invalid' };
       }
+
+      const verified = await verifyIdToken(body.id_token!, { as, jwks, clientId });
+      if (!verified.ok) return verified;
+      // oauth4webapi checked the nonce too; checked again so it doesn't rest on one library.
+      if (verified.payload.nonce !== pending.nonce) return { ok: false, reason: 'invalid' };
       return {
         ok: true,
         returnTo: pending.returnTo,
-        tokens: {
-          accessToken: body.access_token,
-          accessExpiresAt: now + (body.expires_in ?? 0) * 1000,
-          refreshToken: body.refresh_token ?? null,
-          idToken: body.id_token!,
-          claims,
-          claimsAt: now,
-        },
+        tokens: tokenSet(body, body.id_token!, verified.claims, null),
       };
     },
+
+    async refresh(tokens) {
+      if (!tokens.refreshToken) return { ok: false, reason: 'not_signed_in' };
+      const found = await discovered();
+      if (!found) return { ok: false, reason: 'unavailable' };
+      const { as, jwks } = found;
+
+      let response: Response;
+      try {
+        response = await oauth.refreshTokenGrantRequest(
+          as,
+          client,
+          clientAuth,
+          tokens.refreshToken,
+          {
+            additionalParameters: resources.map((r): [string, string] => ['resource', r]),
+            [oauth.customFetch]: fetch,
+          },
+        );
+      } catch {
+        return { ok: false, reason: 'unavailable' };
+      }
+      if (response.status >= 500) return { ok: false, reason: 'unavailable' };
+
+      let body: oauth.TokenEndpointResponse;
+      try {
+        body = await oauth.processRefreshTokenResponse(as, client, response);
+      } catch (error) {
+        throwIfClientRefused(error);
+        const grantRefused =
+          error instanceof oauth.ResponseBodyError && error.error === 'invalid_grant';
+        return { ok: false, reason: grantRefused ? 'not_signed_in' : 'invalid' };
+      }
+
+      // Without a new ID token the claims stand; auth sends one on every refresh.
+      if (!body.id_token) {
+        return { ok: true, tokens: tokenSet(body, tokens.idToken, tokens.claims, tokens) };
+      }
+      const verified = await verifyIdToken(body.id_token, { as, jwks, clientId });
+      if (!verified.ok) return verified;
+      // OIDC Core 12.2: the new ID token is about the same user.
+      if (verified.claims.subject !== tokens.claims.subject)
+        return { ok: false, reason: 'invalid' };
+
+      const before = tokens.claims.entitlements?.organizationId ?? null;
+      const after = verified.claims.entitlements?.organizationId ?? null;
+      if (after !== before) return { ok: false, reason: 'org_changed', activeOrgId: after };
+      return { ok: true, tokens: tokenSet(body, body.id_token, verified.claims, tokens) };
+    },
+
+    isExpiring(tokens, now, skewMs = 60_000) {
+      return tokens.accessExpiresAt - now <= skewMs;
+    },
+
+    async setActiveOrganization(accessToken, orgId) {
+      let response: Response;
+      try {
+        response = await fetch(activeOrgEndpoint, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+          body: JSON.stringify({ organizationId: orgId }),
+        });
+      } catch {
+        return { ok: false, reason: 'unavailable' };
+      }
+      await response.body?.cancel();
+      if (response.status === 404) return { ok: false, reason: 'not_member' };
+      if (response.status === 403) {
+        throw new Error('setActiveOrganization: the access token lacks the organizations scope');
+      }
+      const failed = failure(response);
+      // Anything else auth doesn't send; treat it as auth misbehaving.
+      if (failed)
+        return { ok: false, reason: failed.reason === 'invalid' ? 'unavailable' : failed.reason };
+      return { ok: true };
+    },
+
+    async endSessionUrl({ idToken, postLogoutRedirectUri, state }) {
+      absoluteUrl(postLogoutRedirectUri, 'postLogoutRedirectUri', 'endSessionUrl');
+      const found = await discovered();
+      if (!found) return { ok: false, reason: 'unavailable' };
+      if (!found.as.end_session_endpoint) {
+        throw new TypeError('endSessionUrl: auth advertises no end_session_endpoint');
+      }
+      const url = new URL(found.as.end_session_endpoint);
+      url.searchParams.set('id_token_hint', idToken);
+      url.searchParams.set('client_id', clientId);
+      url.searchParams.set('post_logout_redirect_uri', postLogoutRedirectUri);
+      if (state !== undefined) url.searchParams.set('state', state);
+      return { ok: true, url: url.href };
+    },
+
+    async revoke(refreshToken) {
+      const found = await discovered();
+      if (!found) return { ok: false, reason: 'unavailable' };
+      try {
+        const response = await oauth.revocationRequest(found.as, client, clientAuth, refreshToken, {
+          additionalParameters: { token_type_hint: 'refresh_token' },
+          [oauth.customFetch]: fetch,
+        });
+        await oauth.processRevocationResponse(response);
+        return { ok: true };
+      } catch {
+        return { ok: false, reason: 'unavailable' };
+      }
+    },
+
+    async userInfo(accessToken) {
+      const found = await discovered();
+      if (!found) return { ok: false, reason: 'unavailable' };
+      let response: Response;
+      try {
+        response = await oauth.userInfoRequest(found.as, client, accessToken, {
+          [oauth.customFetch]: fetch,
+        });
+      } catch {
+        return { ok: false, reason: 'unavailable' };
+      }
+      const failed = failure(response);
+      if (failed) return failed;
+      try {
+        return { ok: true, identity: parseIdentity(await response.json()) };
+      } catch {
+        return { ok: false, reason: 'invalid' };
+      }
+    },
+  };
+}
+
+/** auth's `invalid_client` is misconfiguration (a wrong client id or secret), so it throws. */
+function throwIfClientRefused(error: unknown): void {
+  if (error instanceof oauth.ResponseBodyError && error.error === 'invalid_client') {
+    throw new Error('auth refused the client: check the client id and client secret', {
+      cause: error,
+    });
+  }
+}
+
+/**
+ * What a non-2xx answer from a bearer-token endpoint means: a 401 is a session
+ * that ended, a 5xx is auth being down. Null for a 2xx.
+ */
+function failure(
+  response: Response,
+): { ok: false; reason: 'not_signed_in' | 'invalid' | 'unavailable' } | null {
+  if (response.ok) return null;
+  if (response.status === 401) return { ok: false, reason: 'not_signed_in' };
+  if (response.status >= 500) return { ok: false, reason: 'unavailable' };
+  return { ok: false, reason: 'invalid' };
+}
+
+/**
+ * Checks an ID token's signature (which oauth4webapi doesn't, on a token
+ * response), issuer, audience and expiry, and reads its claims.
+ */
+async function verifyIdToken(
+  idToken: string,
+  { as, jwks, clientId }: { as: oauth.AuthorizationServer; jwks: JWKS; clientId: string },
+): Promise<
+  | { ok: true; payload: Record<string, unknown>; claims: Identity }
+  | { ok: false; reason: 'invalid' | 'unavailable' }
+> {
+  let payload: Record<string, unknown>;
+  try {
+    ({ payload } = await jwtVerify(idToken, jwks, {
+      issuer: as.issuer,
+      audience: clientId,
+      clockTolerance: CLOCK_TOLERANCE_S,
+    }));
+  } catch (error) {
+    return { ok: false, reason: jwksUnreachable(error) ? 'unavailable' : 'invalid' };
+  }
+  try {
+    return { ok: true, payload, claims: parseIdentity(payload) };
+  } catch {
+    return { ok: false, reason: 'invalid' };
+  }
+}
+
+/**
+ * The `TokenSet` a token response gives. A refresh response that leaves out
+ * the refresh token keeps the old one.
+ */
+function tokenSet(
+  body: oauth.TokenEndpointResponse,
+  idToken: string,
+  claims: Identity,
+  previous: TokenSet | null,
+): TokenSet {
+  const now = Date.now();
+  return {
+    accessToken: body.access_token,
+    accessExpiresAt: now + (body.expires_in ?? 0) * 1000,
+    refreshToken: body.refresh_token ?? previous?.refreshToken ?? null,
+    idToken,
+    claims,
+    claimsAt: previous && claims === previous.claims ? previous.claimsAt : now,
   };
 }
 
@@ -283,9 +513,9 @@ function checkConfig(config: OidcClientConfig) {
   };
 }
 
-function absoluteUrl(value: unknown, name: string): URL {
+function absoluteUrl(value: unknown, name: string, method = 'createOidcClient'): URL {
   const url = typeof value === 'string' ? parseUrl(value) : null;
-  if (!url) throw new TypeError(`createOidcClient: ${name} must be an absolute URL`);
+  if (!url) throw new TypeError(`${method}: ${name} must be an absolute URL`);
   return url;
 }
 

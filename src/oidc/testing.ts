@@ -1,6 +1,7 @@
 /**
  * A fake OIDC issuer for apps' tests. It answers discovery, JWKS, authorize,
- * token, userinfo, end-session and revocation through the `fetch` it returns,
+ * token, userinfo, end-session, revocation and auth's set-active-organization
+ * endpoint through the `fetch` it returns,
  * so tests need no server or ports and run under Node and workerd.
  *
  * Not part of the production export: nothing in `oidc` or `oidc/claims`
@@ -31,6 +32,13 @@ export interface FakeIssuer {
   nextToken(outcome: TokenOutcome): void;
   /** Scripts the next userinfo request. */
   nextUserInfo(outcome: UserInfoOutcome): void;
+  /**
+   * Scripts the next `POST /api/oidc/organizations/active`, such as a 5xx.
+   * Unscripted, it answers 200 for an org in the token's
+   * `urn:auth:organizations`, 404 for any other and 401 for an unknown token. It
+   * changes nothing that userinfo or the token endpoint answer: script those.
+   */
+  nextActiveOrganization(outcome: StatusOutcome): void;
 }
 
 /** Errors authorize sends back to the redirect URI. */
@@ -102,6 +110,8 @@ export function createFakeIssuer(options: FakeIssuerOptions = {}): FakeIssuer {
   const keys = generateKey();
 
   const endpoint = (path: string) => `${issuer}${path}`;
+  /** auth serves its Organizations API on its origin, outside the issuer path. */
+  const activeOrgEndpoint = `${new URL(issuer).origin}/api/oidc/organizations/active`;
   const discovery = {
     issuer,
     authorization_endpoint: endpoint('/oauth2/authorize'),
@@ -122,6 +132,7 @@ export function createFakeIssuer(options: FakeIssuerOptions = {}): FakeIssuer {
   const authorizeOutcomes: AuthorizeOutcome[] = [];
   const tokenOutcomes: TokenOutcome[] = [];
   const userInfoOutcomes: UserInfoOutcome[] = [];
+  const activeOrgOutcomes: StatusOutcome[] = [];
 
   const codes = new Map<string, Grant>();
   const refreshTokens = new Map<string, Session>();
@@ -307,6 +318,25 @@ export function createFakeIssuer(options: FakeIssuerOptions = {}): FakeIssuer {
     return claims ? Response.json(claims) : invalidToken();
   }
 
+  /** auth's `POST /api/oidc/organizations/active`, on the issuer's origin. */
+  async function setActiveOrganization(request: Request): Promise<Response> {
+    const outcome = activeOrgOutcomes.shift();
+    if (outcome) return statusOnly(outcome.status);
+    const bearer = /^Bearer (.+)$/i.exec(request.headers.get('authorization') ?? '')?.[1];
+    const claims = bearer === undefined ? undefined : accessClaims.get(bearer);
+    if (!claims) return invalidToken();
+    const { organizationId } = (await request.json().catch(() => ({}))) as {
+      organizationId?: unknown;
+    };
+    const orgs = claims['urn:auth:organizations'];
+    const org = Array.isArray(orgs)
+      ? (orgs as Claims[]).find((o) => o?.id === organizationId)
+      : undefined;
+    if (!org) return Response.json({ error: 'not_found' }, { status: 404 });
+    const { id, name, slug, logo, type, role } = org;
+    return Response.json({ id, name, slug, logo, type, role });
+  }
+
   async function revoke(request: Request): Promise<Response> {
     const form = new URLSearchParams(await request.text());
     const revoked = form.get('token') ?? '';
@@ -343,6 +373,8 @@ export function createFakeIssuer(options: FakeIssuerOptions = {}): FakeIssuer {
         return post ? revoke(request) : methodNotAllowed();
       case discovery.end_session_endpoint:
         return endSession(url);
+      case activeOrgEndpoint:
+        return post ? setActiveOrganization(request) : methodNotAllowed();
       default:
         return new Response('Not found', { status: 404 });
     }
@@ -355,6 +387,7 @@ export function createFakeIssuer(options: FakeIssuerOptions = {}): FakeIssuer {
     nextAuthorize: (outcome) => void authorizeOutcomes.push(outcome),
     nextToken: (outcome) => void tokenOutcomes.push(outcome),
     nextUserInfo: (outcome) => void userInfoOutcomes.push(outcome),
+    nextActiveOrganization: (outcome) => void activeOrgOutcomes.push(outcome),
   };
 }
 
