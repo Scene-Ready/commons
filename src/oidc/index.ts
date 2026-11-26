@@ -29,9 +29,6 @@ export interface OidcClientConfig {
   fetch?: typeof globalThis.fetch;
 }
 
-/** Why a network-facing method failed. */
-export type FailureReason = 'not_signed_in' | 'invalid' | 'denied' | 'unavailable';
-
 /** Plain JSON the app stores between `startSignIn` and `finishSignIn`. Times are epoch ms. */
 export interface PendingSignIn {
   state: string;
@@ -102,7 +99,11 @@ export function createOidcClient(config: OidcClientConfig): OidcClient {
       if (!as.authorization_endpoint || !as.jwks_uri) {
         throw new TypeError('OIDC discovery has no authorization_endpoint or jwks_uri');
       }
-      const jwks = createRemoteJWKSet(new URL(as.jwks_uri), { [joseFetch]: fetch });
+      // Kept for the isolate's lifetime; jose still refetches for an unknown `kid`.
+      const jwks = createRemoteJWKSet(new URL(as.jwks_uri), {
+        cacheMaxAge: Infinity,
+        [joseFetch]: fetch,
+      });
       return { as, authorizationEndpoint: as.authorization_endpoint, jwks };
     })();
     // A failed discovery is retried on the next call, not cached.
@@ -143,7 +144,9 @@ export function createOidcClient(config: OidcClientConfig): OidcClient {
     },
 
     async finishSignIn(callbackUrl, pending) {
-      if (!isPending(pending) || Date.now() - pending.createdAt > PENDING_MAX_AGE_MS) {
+      const age = isPending(pending) ? Date.now() - pending.createdAt : NaN;
+      // A tampered pending sign-in, one from the future or one too old.
+      if (!(age >= 0 && age <= PENDING_MAX_AGE_MS)) {
         return { ok: false, reason: 'invalid' };
       }
       let found: Awaited<ReturnType<typeof discover>>;
@@ -159,7 +162,8 @@ export function createOidcClient(config: OidcClientConfig): OidcClient {
         params = oauth.validateAuthResponse(as, client, new URL(callbackUrl), pending.state);
       } catch (error) {
         if (error instanceof oauth.AuthorizationResponseError) {
-          if (NOT_SIGNED_IN.has(error.error)) {
+          // Only a silent sign-in may come back refused; any other refusal is unexpected.
+          if (NOT_SIGNED_IN.has(error.error) && pending.silent) {
             return { ok: false, reason: 'not_signed_in', returnTo: pending.returnTo };
           }
           if (error.error === 'access_denied') return { ok: false, reason: 'denied' };
@@ -199,7 +203,8 @@ export function createOidcClient(config: OidcClientConfig): OidcClient {
         return { ok: false, reason: 'invalid' };
       }
 
-      // oauth4webapi checked the claims; the signature is ours to check.
+      // oauth4webapi checked the claims but not the signature. jose checks both, and the
+      // nonce is checked again below, so verification doesn't rest on one library.
       let payload: Record<string, unknown>;
       try {
         ({ payload } = await jwtVerify(body.id_token!, jwks, {
@@ -294,15 +299,19 @@ function parseUrl(value: string, base?: string): URL | null {
 
 /** Throws unless `returnTo` is a path on the app's own origin. */
 function checkReturnTo(returnTo: unknown): asserts returnTo is string {
-  const base = 'https://app.invalid';
-  if (
-    typeof returnTo !== 'string' ||
-    !returnTo.startsWith('/') ||
-    // `//evil.example` and `/\evil.example` both leave the origin.
-    parseUrl(returnTo, base)?.origin !== base
-  ) {
+  if (!isSameOriginPath(returnTo)) {
     throw new TypeError('startSignIn: returnTo must be a same-origin path such as /rigs/7');
   }
+}
+
+function isSameOriginPath(value: unknown): value is string {
+  const base = 'https://app.invalid';
+  return (
+    typeof value === 'string' &&
+    value.startsWith('/') &&
+    // `//evil.example` and `/\evil.example` both leave the origin.
+    parseUrl(value, base)?.origin === base
+  );
 }
 
 function isPending(value: unknown): value is PendingSignIn {
@@ -312,7 +321,7 @@ function isPending(value: unknown): value is PendingSignIn {
     typeof p.state === 'string' &&
     typeof p.nonce === 'string' &&
     typeof p.verifier === 'string' &&
-    typeof p.returnTo === 'string' &&
+    isSameOriginPath(p.returnTo) &&
     typeof p.silent === 'boolean' &&
     typeof p.createdAt === 'number'
   );

@@ -93,6 +93,17 @@ describe('createOidcClient sign-in', () => {
     });
   });
 
+  it('answers a refusal of a sign-in that was not silent as invalid', async () => {
+    const { issuer, client } = setup();
+    issuer.nextAuthorize({ error: 'login_required' });
+    const { url, pending } = await start(client);
+
+    expect(await client.finishSignIn(await follow(issuer, url), pending)).toEqual({
+      ok: false,
+      reason: 'invalid',
+    });
+  });
+
   it('answers a cancelled sign-in as denied', async () => {
     const { issuer, client } = setup();
     issuer.nextAuthorize({ error: 'access_denied' });
@@ -131,6 +142,19 @@ describe('createOidcClient sign-in', () => {
       const callback = await follow(issuer, url);
       const stale: PendingSignIn = { ...pending, createdAt: Date.now() - 10 * 60_000 - 1000 };
       expect(await client.finishSignIn(callback, stale)).toEqual({ ok: false, reason: 'invalid' });
+    });
+
+    it.each([
+      ['a createdAt in the future', { createdAt: Date.now() + 60 * 60_000 }],
+      ['an off-origin returnTo', { returnTo: '//evil.example/' }],
+    ])('for a pending sign-in with %s', async (_, change) => {
+      const { issuer, client } = setup();
+      const { url, pending } = await start(client);
+      const callback = await follow(issuer, url);
+      expect(await client.finishSignIn(callback, { ...pending, ...change })).toEqual({
+        ok: false,
+        reason: 'invalid',
+      });
     });
 
     it('for a tampered pending sign-in', async () => {
@@ -216,6 +240,35 @@ describe('createOidcClient sign-in', () => {
       });
       down = false;
       expect(await client.startSignIn({ returnTo: '/' })).toMatchObject({ ok: true });
+    });
+
+    it('when the JWKS answers 5xx', async () => {
+      const issuer = createFakeIssuer({ issuer: ISSUER });
+      const { client } = setup({
+        fetch: async (input, init) => {
+          const request = new Request(input, init);
+          if (new URL(request.url).pathname === '/jwks') return new Response(null, { status: 503 });
+          return issuer.fetch(request);
+        },
+      });
+      const { url, pending } = await start(client);
+      expect(await client.finishSignIn(await follow(issuer, url), pending)).toEqual({
+        ok: false,
+        reason: 'unavailable',
+      });
+    });
+
+    it('when authorize answers temporarily_unavailable', async () => {
+      const { client } = setup();
+      const { pending } = await start(client);
+      const callback = new URL(REDIRECT_URI);
+      callback.searchParams.set('error', 'temporarily_unavailable');
+      callback.searchParams.set('state', pending.state);
+      callback.searchParams.set('iss', ISSUER);
+      expect(await client.finishSignIn(callback, pending)).toEqual({
+        ok: false,
+        reason: 'unavailable',
+      });
     });
 
     it('when the network fails', async () => {
