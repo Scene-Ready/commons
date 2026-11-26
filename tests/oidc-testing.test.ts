@@ -412,4 +412,61 @@ describe('createFakeIssuer', () => {
       });
     });
   });
+
+  describe('active organization', () => {
+    const ORGS = [
+      {
+        id: 'org_a',
+        name: 'A',
+        slug: 'a',
+        logo: null,
+        type: 'shared',
+        role: 'owner',
+        isActive: true,
+      },
+      {
+        id: 'org_b',
+        name: 'B',
+        slug: 'b',
+        logo: null,
+        type: 'shared',
+        role: 'member',
+        isActive: false,
+      },
+    ];
+
+    function setActive(issuer: ReturnType<typeof createFakeIssuer>, bearer: string, id: string) {
+      return issuer.fetch('https://issuer.test/api/oidc/organizations/active', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${bearer}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ organizationId: id }),
+      });
+    }
+
+    it("sets an org the user's token lists, and answers 404 for any other", async () => {
+      const issuer = createFakeIssuer({ issuer: 'https://issuer.test/api/auth' });
+      const bearer = await issuer.accessToken(
+        { sub: 'usr_1', 'urn:auth:organizations': ORGS },
+        { aud: 'https://rig.example' },
+      );
+      const res = await setActive(issuer, bearer, 'org_b');
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        id: 'org_b',
+        name: 'B',
+        slug: 'b',
+        logo: null,
+        type: 'shared',
+        role: 'member',
+      });
+      expect((await setActive(issuer, bearer, 'org_z')).status).toBe(404);
+    });
+
+    it('answers 401 for an unknown token, and a scripted status', async () => {
+      const issuer = createFakeIssuer({ issuer: ISSUER });
+      expect((await setActive(issuer, 'nope', 'org_a')).status).toBe(401);
+      issuer.nextActiveOrganization({ status: 503 });
+      expect((await setActive(issuer, 'nope', 'org_a')).status).toBe(503);
+    });
+  });
 });

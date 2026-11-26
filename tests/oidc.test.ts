@@ -305,3 +305,321 @@ describe('createOidcClient sign-in', () => {
     );
   });
 });
+
+/** A signed-in client: tokens from a full sign-in as `claims`. */
+async function signedIn(claims: Record<string, unknown> = { sub: 'usr_1' }, overrides = {}) {
+  const { issuer, client } = setup(overrides);
+  issuer.nextToken({ claims });
+  const { url, pending } = await start(client);
+  const result = await client.finishSignIn(await follow(issuer, url), pending);
+  if (!result.ok) throw new Error(`sign-in failed: ${result.reason}`);
+  return { issuer, client, tokens: result.tokens };
+}
+
+const org = (organizationId: string) => ({
+  organizationId,
+  role: 'member',
+  products: {},
+  unseatedProducts: [],
+});
+
+describe('refresh', () => {
+  it('returns a new TokenSet with the new claims and rotated refresh token', async () => {
+    const { issuer, client, tokens } = await signedIn({
+      sub: 'usr_1',
+      name: 'Ada',
+      'urn:auth:entitlements': org('org_a'),
+    });
+    issuer.nextToken({
+      claims: { sub: 'usr_1', name: 'Ada L.', 'urn:auth:entitlements': org('org_a') },
+    });
+
+    const result = await client.refresh(tokens);
+
+    expect(result).toMatchObject({
+      ok: true,
+      tokens: {
+        claims: { subject: 'usr_1', name: 'Ada L.', entitlements: { organizationId: 'org_a' } },
+      },
+    });
+    if (!result.ok) return;
+    expect(result.tokens.accessToken).not.toBe(tokens.accessToken);
+    expect(result.tokens.refreshToken).toEqual(expect.any(String));
+    expect(result.tokens.refreshToken).not.toBe(tokens.refreshToken);
+    expect(result.tokens.idToken).not.toBe(tokens.idToken);
+  });
+
+  it('keeps the old refresh token when the response leaves it out', async () => {
+    const { issuer, client, tokens } = await signedIn();
+    issuer.nextToken({ refreshToken: null });
+    const result = await client.refresh(tokens);
+    expect(result).toMatchObject({ ok: true, tokens: { refreshToken: tokens.refreshToken } });
+  });
+
+  it('answers invalid_grant as not_signed_in', async () => {
+    const { issuer, client, tokens } = await signedIn();
+    issuer.nextToken({ error: 'invalid_grant' });
+    expect(await client.refresh(tokens)).toEqual({ ok: false, reason: 'not_signed_in' });
+  });
+
+  it('answers not_signed_in without a refresh token', async () => {
+    const { client, tokens } = await signedIn();
+    expect(await client.refresh({ ...tokens, refreshToken: null })).toEqual({
+      ok: false,
+      reason: 'not_signed_in',
+    });
+  });
+
+  it('answers org_changed with the new Active Org and no tokens', async () => {
+    const { issuer, client, tokens } = await signedIn({
+      sub: 'usr_1',
+      'urn:auth:entitlements': org('org_a'),
+    });
+    issuer.nextToken({ claims: { sub: 'usr_1', 'urn:auth:entitlements': org('org_b') } });
+    expect(await client.refresh(tokens)).toEqual({
+      ok: false,
+      reason: 'org_changed',
+      activeOrgId: 'org_b',
+    });
+  });
+
+  it('answers org_changed with a null activeOrgId when the Active Org is gone', async () => {
+    const { issuer, client, tokens } = await signedIn({
+      sub: 'usr_1',
+      'urn:auth:entitlements': org('org_a'),
+    });
+    issuer.nextToken({ claims: { sub: 'usr_1' } });
+    expect(await client.refresh(tokens)).toEqual({
+      ok: false,
+      reason: 'org_changed',
+      activeOrgId: null,
+    });
+  });
+
+  it('answers invalid for a new ID token about another user, or signed by another key', async () => {
+    const { issuer, client, tokens } = await signedIn();
+    issuer.nextToken({ claims: { sub: 'usr_2' } });
+    expect(await client.refresh(tokens)).toEqual({ ok: false, reason: 'invalid' });
+
+    const again = await signedIn();
+    const impostor = createFakeIssuer({ issuer: ISSUER });
+    again.issuer.nextToken({ idToken: await impostor.idToken({ sub: 'usr_1', aud: 'rig' }) });
+    expect(await again.client.refresh(again.tokens)).toEqual({ ok: false, reason: 'invalid' });
+  });
+
+  it('answers a 5xx as unavailable', async () => {
+    const { issuer, client, tokens } = await signedIn();
+    issuer.nextToken({ status: 503 });
+    expect(await client.refresh(tokens)).toEqual({ ok: false, reason: 'unavailable' });
+  });
+});
+
+describe('isExpiring', () => {
+  const tokens = { accessExpiresAt: 1_000_000 } as Parameters<
+    ReturnType<typeof setup>['client']['isExpiring']
+  >[0];
+
+  it('is true within the default 60 s skew, and false before it', () => {
+    const { client } = setup();
+    expect(client.isExpiring(tokens, 1_000_000 - 60_001)).toBe(false);
+    expect(client.isExpiring(tokens, 1_000_000 - 60_000)).toBe(true);
+    expect(client.isExpiring(tokens, 1_000_001)).toBe(true);
+  });
+
+  it('honours a given skew', () => {
+    const { client } = setup();
+    expect(client.isExpiring(tokens, 1_000_000 - 5_000, 1_000)).toBe(false);
+    expect(client.isExpiring(tokens, 1_000_000 - 5_000, 5_000)).toBe(true);
+  });
+});
+
+describe('userInfo', () => {
+  it('returns the parsed Identity', async () => {
+    const { issuer, client, tokens } = await signedIn();
+    issuer.nextUserInfo({
+      claims: { sub: 'usr_1', email: 'a@example.org', 'urn:auth:entitlements': org('org_b') },
+    });
+    expect(await client.userInfo(tokens.accessToken)).toMatchObject({
+      ok: true,
+      identity: {
+        subject: 'usr_1',
+        email: 'a@example.org',
+        entitlements: { organizationId: 'org_b' },
+      },
+    });
+  });
+
+  it('answers the claims the access token was issued for, without scripting', async () => {
+    const { client, tokens } = await signedIn({ sub: 'usr_1', name: 'Ada' });
+    expect(await client.userInfo(tokens.accessToken)).toMatchObject({
+      ok: true,
+      identity: { subject: 'usr_1', name: 'Ada' },
+    });
+  });
+
+  it('answers a 401 as not_signed_in', async () => {
+    const { issuer, client, tokens } = await signedIn();
+    issuer.nextUserInfo({ status: 401 });
+    expect(await client.userInfo(tokens.accessToken)).toEqual({
+      ok: false,
+      reason: 'not_signed_in',
+    });
+  });
+
+  it('answers a 5xx as unavailable', async () => {
+    const { issuer, client, tokens } = await signedIn();
+    issuer.nextUserInfo({ status: 502 });
+    expect(await client.userInfo(tokens.accessToken)).toEqual({ ok: false, reason: 'unavailable' });
+  });
+
+  it('answers a body without sub as invalid', async () => {
+    const { issuer, client, tokens } = await signedIn();
+    issuer.nextUserInfo({ claims: { email: 'a@example.org' } });
+    expect(await client.userInfo(tokens.accessToken)).toEqual({ ok: false, reason: 'invalid' });
+  });
+});
+
+describe('setActiveOrganization', () => {
+  const ORGS = [
+    {
+      id: 'org_a',
+      name: 'A',
+      slug: 'a',
+      logo: null,
+      type: 'shared',
+      role: 'owner',
+      isActive: true,
+    },
+    {
+      id: 'org_b',
+      name: 'B',
+      slug: 'b',
+      logo: null,
+      type: 'shared',
+      role: 'member',
+      isActive: false,
+    },
+  ];
+  const member = () => signedIn({ sub: 'usr_1', 'urn:auth:organizations': ORGS });
+
+  it('sets an org the user belongs to: ok', async () => {
+    const { client, tokens } = await member();
+    expect(await client.setActiveOrganization(tokens.accessToken, 'org_b')).toEqual({ ok: true });
+  });
+
+  it("answers auth's 404 as not_member", async () => {
+    const { client, tokens } = await member();
+    expect(await client.setActiveOrganization(tokens.accessToken, 'org_z')).toEqual({
+      ok: false,
+      reason: 'not_member',
+    });
+  });
+
+  it('answers a 401 as not_signed_in', async () => {
+    const { client } = await member();
+    expect(await client.setActiveOrganization('expired', 'org_b')).toEqual({
+      ok: false,
+      reason: 'not_signed_in',
+    });
+  });
+
+  it('answers a 5xx as unavailable', async () => {
+    const { issuer, client, tokens } = await member();
+    issuer.nextActiveOrganization({ status: 500 });
+    expect(await client.setActiveOrganization(tokens.accessToken, 'org_b')).toEqual({
+      ok: false,
+      reason: 'unavailable',
+    });
+  });
+
+  it('throws on a 403: the token lacks the organizations scope', async () => {
+    const { issuer, client, tokens } = await member();
+    issuer.nextActiveOrganization({ status: 403 });
+    await expect(client.setActiveOrganization(tokens.accessToken, 'org_b')).rejects.toThrow(
+      /organizations scope/,
+    );
+  });
+
+  it('calls auth on the issuer origin when the issuer has a path, as auth does', async () => {
+    const issuer = createFakeIssuer({ issuer: 'https://issuer.test/api/auth' });
+    const client = createOidcClient({
+      issuer: 'https://issuer.test/api/auth',
+      clientId: 'rig',
+      clientSecret: 's3cret',
+      redirectUri: REDIRECT_URI,
+      scopes: ['organizations'],
+      fetch: issuer.fetch,
+    });
+    const bearer = await issuer.accessToken(
+      { sub: 'usr_1', 'urn:auth:organizations': ORGS },
+      { aud: 'https://rig.example' },
+    );
+    expect(await client.setActiveOrganization(bearer, 'org_b')).toEqual({ ok: true });
+  });
+});
+
+/** A client whose fetch answers `status` for one path and passes the rest to the fake. */
+function failingAt(path: string, status: number) {
+  const issuer = createFakeIssuer({ issuer: ISSUER });
+  const { client } = setup({
+    fetch: async (input, init) => {
+      const request = new Request(input, init);
+      if (new URL(request.url).pathname === path) return new Response(null, { status });
+      return issuer.fetch(request);
+    },
+  });
+  return { issuer, client };
+}
+
+describe('endSessionUrl', () => {
+  it("is auth's end-session URL, which signs out and returns to the app", async () => {
+    const { issuer, client, tokens } = await signedIn();
+    const result = await client.endSessionUrl({
+      idToken: tokens.idToken,
+      postLogoutRedirectUri: 'https://rig.example/signed-out',
+    });
+    if (!result.ok) throw new Error(result.reason);
+    const url = new URL(result.url);
+    expect(`${url.origin}${url.pathname}`).toBe(`${ISSUER}/oauth2/end-session`);
+    expect(url.searchParams.get('id_token_hint')).toBe(tokens.idToken);
+    expect(url.searchParams.get('client_id')).toBe('rig');
+    const res = await issuer.fetch(url, { redirect: 'manual' });
+    expect(res.headers.get('location')).toBe('https://rig.example/signed-out');
+  });
+
+  it('answers unavailable when discovery answers 5xx', async () => {
+    const { client } = failingAt('/.well-known/openid-configuration', 503);
+    expect(
+      await client.endSessionUrl({ idToken: 'x', postLogoutRedirectUri: 'https://rig.example/' }),
+    ).toEqual({ ok: false, reason: 'unavailable' });
+  });
+
+  it('throws for a relative post-logout redirect URI', async () => {
+    const { client } = setup();
+    await expect(
+      client.endSessionUrl({ idToken: 'x', postLogoutRedirectUri: '/signed-out' }),
+    ).rejects.toThrow(TypeError);
+  });
+});
+
+describe('revoke', () => {
+  it('revokes the refresh token: ok, and it no longer refreshes', async () => {
+    const { client, tokens } = await signedIn();
+    expect(await client.revoke(tokens.refreshToken!)).toEqual({ ok: true });
+    expect(await client.refresh(tokens)).toEqual({ ok: false, reason: 'not_signed_in' });
+  });
+
+  it('answers a 5xx as unavailable', async () => {
+    const { client } = failingAt('/oauth2/revoke', 503);
+    expect(await client.revoke('rt')).toEqual({ ok: false, reason: 'unavailable' });
+  });
+
+  it('answers a network failure as unavailable rather than throwing', async () => {
+    const { client } = setup({
+      fetch: async () => {
+        throw new TypeError('fetch failed');
+      },
+    });
+    expect(await client.revoke('rt')).toEqual({ ok: false, reason: 'unavailable' });
+  });
+});
