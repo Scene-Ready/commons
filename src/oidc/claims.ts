@@ -90,7 +90,7 @@ export function parseIdentity(payload: Record<string, unknown>): Identity {
 function parseEntitlements(claim: unknown): Entitlements | null {
   if (!isRecord(claim)) return null;
   const { organizationId, role, products, unseatedProducts } = claim;
-  if (typeof organizationId !== 'string' || (role !== null && typeof role !== 'string')) {
+  if (typeof organizationId !== 'string' || !isStringOrNull(role)) {
     return null;
   }
   return {
@@ -144,7 +144,7 @@ function parseOrganization(entry: unknown): Organization | null {
     typeof id !== 'string' ||
     typeof name !== 'string' ||
     typeof slug !== 'string' ||
-    (logo !== null && typeof logo !== 'string') ||
+    !isStringOrNull(logo) ||
     (type !== 'personal' && type !== 'shared') ||
     typeof role !== 'string' ||
     typeof isActive !== 'boolean'
@@ -156,6 +156,10 @@ function parseOrganization(entry: unknown): Organization | null {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isStringOrNull(value: unknown): value is string | null {
+  return value === null || typeof value === 'string';
 }
 
 function stringOrNull(value: unknown): string | null {

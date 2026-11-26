@@ -1,7 +1,7 @@
 {
   "name": "@scene-ready/commons",
   "version": "0.8.0",
-  "description": "Shared code for Scene Ready apps: cross-app references, the event standard and outbox, branded QR codes, the notifications contract.",
+  "description": "Shared code for Scene Ready apps: cross-app references, the event standard and outbox, branded QR codes, the notifications contract, OIDC claims.",
   "private": true,
   "license": "UNLICENSED",
   "type": "module",
