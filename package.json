@@ -1,7 +1,7 @@
 {
   "name": "@scene-ready/commons",
   "version": "0.8.0",
-  "description": "Shared code for Scene Ready apps: cross-app references, the event standard and outbox, branded QR codes, the notifications contract, OIDC claims.",
+  "description": "Shared code for Scene Ready apps: cross-app references, the event standard and outbox, branded QR codes, the notifications contract, OIDC sign-in and claims.",
   "private": true,
   "license": "UNLICENSED",
   "type": "module",
@@ -34,6 +34,10 @@
       "types": "./dist/notifications/index.d.ts",
       "default": "./dist/notifications/index.js"
     },
+    "./oidc": {
+      "types": "./dist/oidc/index.d.ts",
+      "default": "./dist/oidc/index.js"
+    },
     "./oidc/claims": {
       "types": "./dist/oidc/claims.d.ts",
       "default": "./dist/oidc/claims.js"
@@ -63,6 +67,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "jose": "^6.2.18",
+    "oauth4webapi": "^3.8.9",
     "uqr": "^0.1.3"
   },
   "peerDependencies": {
