@@ -83,7 +83,7 @@ const DEFAULT_CLAIMS: Claims = { sub: 'usr_fake' };
 interface Grant {
   clientId: string;
   redirectUri: string;
-  codeChallenge: string | null;
+  codeChallenge: string;
   nonce: string | null;
   scope: string;
   resource: string[];
@@ -128,10 +128,10 @@ export function createFakeIssuer(options: FakeIssuerOptions = {}): FakeIssuer {
   /** Userinfo's answer for each access token issued. */
   const accessClaims = new Map<string, Claims>();
 
-  async function sign(claims: Claims): Promise<string> {
+  async function sign(claims: Claims, typ = 'JWT'): Promise<string> {
     const { privateKey, kid } = await keys;
     const now = Math.floor(Date.now() / 1000);
-    const header = base64url(json({ alg: 'ES256', typ: 'JWT', kid }));
+    const header = base64url(json({ alg: 'ES256', typ, kid }));
     const payload = base64url(json({ iss: issuer, iat: now, exp: now + LIFETIME_S, ...claims }));
     const signature = await crypto.subtle.sign(
       { name: 'ECDSA', hash: 'SHA-256' },
@@ -142,7 +142,8 @@ export function createFakeIssuer(options: FakeIssuerOptions = {}): FakeIssuer {
   }
 
   async function accessToken(claims: Claims, { aud }: { aud: string | string[] }) {
-    const jwt = await sign({ aud, ...claims });
+    // RFC 9068 JWT access token.
+    const jwt = await sign({ aud, jti: randomToken(), ...claims }, 'at+jwt');
     accessClaims.set(jwt, claims);
     return jwt;
   }
@@ -151,7 +152,14 @@ export function createFakeIssuer(options: FakeIssuerOptions = {}): FakeIssuer {
     const q = url.searchParams;
     const redirectUri = q.get('redirect_uri');
     const clientId = q.get('client_id');
-    if (!redirectUri || !clientId || q.get('response_type') !== 'code') {
+    const codeChallenge = q.get('code_challenge');
+    if (
+      !redirectUri ||
+      !clientId ||
+      q.get('response_type') !== 'code' ||
+      !codeChallenge ||
+      q.get('code_challenge_method') !== 'S256'
+    ) {
       return oauthError('invalid_request');
     }
     const outcome = authorizeOutcomes.shift() ?? {};
@@ -163,7 +171,7 @@ export function createFakeIssuer(options: FakeIssuerOptions = {}): FakeIssuer {
       codes.set(code, {
         clientId,
         redirectUri,
-        codeChallenge: q.get('code_challenge'),
+        codeChallenge,
         nonce: q.get('nonce'),
         scope: q.get('scope') ?? '',
         resource: q.getAll('resource'),
@@ -195,8 +203,7 @@ export function createFakeIssuer(options: FakeIssuerOptions = {}): FakeIssuer {
           !grant ||
           grant.clientId !== clientId ||
           grant.redirectUri !== form.get('redirect_uri') ||
-          (grant.codeChallenge !== null &&
-            (await s256(form.get('code_verifier') ?? '')) !== grant.codeChallenge)
+          (await s256(form.get('code_verifier') ?? '')) !== grant.codeChallenge
         ) {
           return oauthError('invalid_grant');
         }

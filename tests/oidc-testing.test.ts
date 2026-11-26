@@ -153,7 +153,17 @@ describe('createFakeIssuer', () => {
       redirect_uri: CLIENT.redirectUri,
       code_verifier: 'not-the-verifier-that-made-the-challenge-0123456789',
     });
+    expect(wrong.status).toBe(400);
     expect(await wrong.json()).toMatchObject({ error: 'invalid_grant' });
+  });
+
+  it('refuses an authorize request without PKCE', async () => {
+    const issuer = createFakeIssuer({ issuer: ISSUER });
+    const url = new URL(`${ISSUER}/oauth2/authorize`);
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('client_id', CLIENT.id);
+    url.searchParams.set('redirect_uri', CLIENT.redirectUri);
+    expect((await issuer.fetch(url, { redirect: 'manual' })).status).toBe(400);
   });
 
   it('refuses a token request without client_secret_basic', async () => {
@@ -320,8 +330,11 @@ describe('createFakeIssuer', () => {
         { sub: 'usr_5', exp: 1 },
         { aud: 'https://rig.example' },
       );
-      const { valid, payload } = await verifyJwt(issuer.fetch, jwt);
+      const { valid, header, payload } = await verifyJwt(issuer.fetch, jwt);
       expect(valid).toBe(true);
+      // RFC 9068: a JWT access token is typed at+jwt and carries a jti.
+      expect(header.typ).toBe('at+jwt');
+      expect(typeof payload.jti).toBe('string');
       expect(payload).toMatchObject({ aud: 'https://rig.example', sub: 'usr_5', exp: 1 });
     });
 

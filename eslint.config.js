@@ -20,7 +20,10 @@ export default tseslint.config(
         'error',
         {
           patterns: [
-            { group: ['**/testing', '**/testing.*'], message: 'oidc/testing is test-only.' },
+            {
+              group: ['./testing', './testing.*', '**/oidc/testing', '**/oidc/testing.*'],
+              message: 'oidc/testing is test-only.',
+            },
           ],
         },
       ],

@@ -90,7 +90,7 @@ Planned next, each behind its own entry point: `m2m` (client-credentials tokens 
 
 ```sh
 npm install
-npm test            # Vitest: Node, plus the outbox on real D1 in workerd
+npm test            # Vitest: Node, plus the fake issuer and the outbox on real D1 in workerd
 npm run typecheck   # tsc over src and tests
 npm run lint        # ESLint; warnings fail
 npm run format      # Prettier (format:check in CI)
