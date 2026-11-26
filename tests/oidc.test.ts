@@ -285,6 +285,15 @@ describe('createOidcClient sign-in', () => {
   });
 
   describe('throws', () => {
+    it('from finishSignIn when auth refuses the client: the secret is wrong', async () => {
+      const { issuer, client } = setup();
+      issuer.nextToken({ error: 'invalid_client' });
+      const { url, pending } = await start(client);
+      await expect(client.finishSignIn(await follow(issuer, url), pending)).rejects.toThrow(
+        /client secret/,
+      );
+    });
+
     it.each([
       ['an issuer that is not a URL', { issuer: 'issuer.test' }],
       ['an http issuer', { issuer: 'http://issuer.test' }],
@@ -411,6 +420,12 @@ describe('refresh', () => {
     const { issuer, client, tokens } = await signedIn();
     issuer.nextToken({ status: 503 });
     expect(await client.refresh(tokens)).toEqual({ ok: false, reason: 'unavailable' });
+  });
+
+  it('throws when auth refuses the client: the secret is wrong', async () => {
+    const { issuer, client, tokens } = await signedIn();
+    issuer.nextToken({ error: 'invalid_client' });
+    await expect(client.refresh(tokens)).rejects.toThrow(/client secret/);
   });
 });
 
@@ -585,6 +600,18 @@ describe('endSessionUrl', () => {
     expect(url.searchParams.get('client_id')).toBe('rig');
     const res = await issuer.fetch(url, { redirect: 'manual' });
     expect(res.headers.get('location')).toBe('https://rig.example/signed-out');
+  });
+
+  it('sends a state, which auth echoes back', async () => {
+    const { issuer, client, tokens } = await signedIn();
+    const result = await client.endSessionUrl({
+      idToken: tokens.idToken,
+      postLogoutRedirectUri: 'https://rig.example/signed-out',
+      state: 'csrf-1',
+    });
+    if (!result.ok) throw new Error(result.reason);
+    const res = await issuer.fetch(result.url, { redirect: 'manual' });
+    expect(res.headers.get('location')).toBe('https://rig.example/signed-out?state=csrf-1');
   });
 
   it('answers unavailable when discovery answers 5xx', async () => {

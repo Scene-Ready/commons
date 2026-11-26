@@ -61,6 +61,8 @@ export type UserInfoResult =
 export type SetActiveOrganizationResult =
   { ok: true } | { ok: false; reason: 'not_member' | 'not_signed_in' | 'unavailable' };
 
+export type RevokeResult = { ok: true } | { ok: false; reason: 'unavailable' };
+
 export type EndSessionUrlResult = { ok: true; url: string } | { ok: false; reason: 'unavailable' };
 
 export interface OidcClient {
@@ -85,7 +87,8 @@ export interface OidcClient {
   isExpiring(tokens: Pick<TokenSet, 'accessExpiresAt'>, now: number, skewMs?: number): boolean;
   /**
    * The user's claims from userinfo: the Org-follow check (home ADR 0002). When
-   * the org is unchanged, they replace `TokenSet.claims`.
+   * the org is unchanged, they replace `TokenSet.claims`; check first that
+   * `identity.subject` is the session's user (OIDC Core 5.3.2).
    */
   userInfo(accessToken: string): Promise<UserInfoResult>;
   /**
@@ -101,9 +104,11 @@ export interface OidcClient {
   endSessionUrl(options: {
     idToken: string;
     postLogoutRedirectUri: string;
+    /** Echoed back on the redirect, for the app's CSRF check. */
+    state?: string;
   }): Promise<EndSessionUrlResult>;
   /** Revokes a refresh token. A failure must not block sign-out: this never throws. */
-  revoke(refreshToken: string): Promise<{ ok: true } | { ok: false; reason: 'unavailable' }>;
+  revoke(refreshToken: string): Promise<RevokeResult>;
 }
 
 type JWKS = ReturnType<typeof createRemoteJWKSet>;
@@ -250,7 +255,8 @@ export function createOidcClient(config: OidcClientConfig): OidcClient {
           expectedNonce: pending.nonce,
           requireIdToken: true,
         });
-      } catch {
+      } catch (error) {
+        throwIfClientRefused(error);
         return { ok: false, reason: 'invalid' };
       }
 
@@ -292,6 +298,7 @@ export function createOidcClient(config: OidcClientConfig): OidcClient {
       try {
         body = await oauth.processRefreshTokenResponse(as, client, response);
       } catch (error) {
+        throwIfClientRefused(error);
         const grantRefused =
           error instanceof oauth.ResponseBodyError && error.error === 'invalid_grant';
         return { ok: false, reason: grantRefused ? 'not_signed_in' : 'invalid' };
@@ -340,7 +347,7 @@ export function createOidcClient(config: OidcClientConfig): OidcClient {
       return { ok: true };
     },
 
-    async endSessionUrl({ idToken, postLogoutRedirectUri }) {
+    async endSessionUrl({ idToken, postLogoutRedirectUri, state }) {
       absoluteUrl(postLogoutRedirectUri, 'postLogoutRedirectUri', 'endSessionUrl');
       const found = await discovered();
       if (!found) return { ok: false, reason: 'unavailable' };
@@ -351,12 +358,14 @@ export function createOidcClient(config: OidcClientConfig): OidcClient {
       url.searchParams.set('id_token_hint', idToken);
       url.searchParams.set('client_id', clientId);
       url.searchParams.set('post_logout_redirect_uri', postLogoutRedirectUri);
+      if (state !== undefined) url.searchParams.set('state', state);
       return { ok: true, url: url.href };
     },
 
     async revoke(refreshToken) {
+      const found = await discovered();
+      if (!found) return { ok: false, reason: 'unavailable' };
       try {
-        const found = await discover();
         const response = await oauth.revocationRequest(found.as, client, clientAuth, refreshToken, {
           additionalParameters: { token_type_hint: 'refresh_token' },
           [oauth.customFetch]: fetch,
@@ -388,6 +397,15 @@ export function createOidcClient(config: OidcClientConfig): OidcClient {
       }
     },
   };
+}
+
+/** auth's `invalid_client` is misconfiguration (a wrong client id or secret), so it throws. */
+function throwIfClientRefused(error: unknown): void {
+  if (error instanceof oauth.ResponseBodyError && error.error === 'invalid_client') {
+    throw new Error('auth refused the client: check the client id and client secret', {
+      cause: error,
+    });
+  }
 }
 
 /**
