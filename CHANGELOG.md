@@ -2,6 +2,10 @@
 
 Grouped by entry point. Versions follow semver across the whole package.
 
+## Unreleased
+
+- `oidc/claims`: New entry point, the claims auth puts in ID tokens and userinfo, under auth's wire names: `Identity`, `Organization`, `Entitlements`, `ProductEntitlement` and `TokenSet`. `parseIdentity(payload)` reads `sub`, `email`, `name`, `picture`, `is_platform_admin`, `urn:auth:organizations` and `urn:auth:entitlements`; it drops a malformed organization or product and keeps the rest, ignores unknown fields, and throws a `TypeError` without `sub`. No dependencies.
+
 ## 0.8.0 — 2026-11-25
 
 - `events`: `X-SR-Signature` may carry several `v1` signatures, so a subscription's secret can rotate without a gap (ADR-0007). `verifyDelivery` accepts a delivery if any `v1` matches its `secret`, and refuses a header with more than two. `signBody` takes `[newKey, oldKey]` during an overlap and puts the old key's signature last.

@@ -34,6 +34,10 @@
       "types": "./dist/notifications/index.d.ts",
       "default": "./dist/notifications/index.js"
     },
+    "./oidc/claims": {
+      "types": "./dist/oidc/claims.d.ts",
+      "default": "./dist/oidc/claims.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
