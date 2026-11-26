@@ -38,6 +38,10 @@
       "types": "./dist/oidc/claims.d.ts",
       "default": "./dist/oidc/claims.js"
     },
+    "./oidc/testing": {
+      "types": "./dist/oidc/testing.d.ts",
+      "default": "./dist/oidc/testing.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [

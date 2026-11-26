@@ -2,15 +2,16 @@
 
 Shared code for Scene Ready apps: cross-app references, the event standard and its outbox, branded QR codes, the notifications contract, and the OIDC claims auth issues. One package with an entry point per module, so each app imports only what it uses.
 
-| Entry point                          | What it holds                                                                                                                                         | Runs in       |
-| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
-| `@scene-ready/commons/refs`          | `sr:<app>:<type>:<id>` references: `parseRef`, `formatRef`, `isRef`                                                                                   | anywhere      |
-| `@scene-ready/commons/events`        | The event envelope, `validateEvent`, `validateDraft`, `newEventId`, `cursorAt`, the Hub's interface (`EventsHub`), signed delivery (`verifyDelivery`) | Workers, Node |
-| `@scene-ready/commons/outbox`        | The publisher's transactional outbox on D1: `outboxStatements`, `sendPending`, `sweepOutbox`, `resendRejected`, `listRejected`, `listStuck`           | Workers       |
-| `@scene-ready/commons/qr`            | Branded QR codes as data or a standalone SVG string (`brandedQrSvg`)                                                                                  | anywhere      |
-| `@scene-ready/commons/notifications` | The notifications Worker as apps see it over `NOTIFY`: `sendEmail` (`Notify`, `EmailInput`, `SendResult`) and `validateEmailInput`                    | anywhere      |
-| `@scene-ready/commons/qr/react`      | `<QrCode>` for React apps                                                                                                                             | browser, SSR  |
-| `@scene-ready/commons/oidc/claims`   | The claims auth issues, typed (`Identity`, `Organization`, `Entitlements`, `TokenSet`), and `parseIdentity` for an ID token payload or userinfo       | anywhere      |
+| Entry point                          | What it holds                                                                                                                                                     | Runs in       |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| `@scene-ready/commons/refs`          | `sr:<app>:<type>:<id>` references: `parseRef`, `formatRef`, `isRef`                                                                                               | anywhere      |
+| `@scene-ready/commons/events`        | The event envelope, `validateEvent`, `validateDraft`, `newEventId`, `cursorAt`, the Hub's interface (`EventsHub`), signed delivery (`verifyDelivery`)             | Workers, Node |
+| `@scene-ready/commons/outbox`        | The publisher's transactional outbox on D1: `outboxStatements`, `sendPending`, `sweepOutbox`, `resendRejected`, `listRejected`, `listStuck`                       | Workers       |
+| `@scene-ready/commons/qr`            | Branded QR codes as data or a standalone SVG string (`brandedQrSvg`)                                                                                              | anywhere      |
+| `@scene-ready/commons/notifications` | The notifications Worker as apps see it over `NOTIFY`: `sendEmail` (`Notify`, `EmailInput`, `SendResult`) and `validateEmailInput`                                | anywhere      |
+| `@scene-ready/commons/qr/react`      | `<QrCode>` for React apps                                                                                                                                         | browser, SSR  |
+| `@scene-ready/commons/oidc/claims`   | The claims auth issues, typed (`Identity`, `Organization`, `Entitlements`, `TokenSet`), and `parseIdentity` for an ID token payload or userinfo                   | anywhere      |
+| `@scene-ready/commons/oidc/testing`  | For apps' tests only: `createFakeIssuer`, an OIDC issuer behind a `fetch` that signs tokens with chosen claims and scripts authorize, token and userinfo outcomes | anywhere      |
 
 The standards these modules enforce are in [`docs/contracts/`](docs/contracts/): the [API standard](docs/contracts/api-standard.md) and the [event standard](docs/contracts/event-standard.md). The overall design is the doc **Scene Ready — Cross-App Data Sharing Standard**.
 
