@@ -11,4 +11,22 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.browser, ...globals.node } },
     linterOptions: { reportUnusedDisableDirectives: 'error' },
   },
+  {
+    // oidc/testing is for apps' tests: no production entry point may reach it.
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/oidc/testing.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['./testing', './testing.*', '**/oidc/testing', '**/oidc/testing.*'],
+              message: 'oidc/testing is test-only.',
+            },
+          ],
+        },
+      ],
+    },
+  },
 );

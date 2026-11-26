@@ -14,6 +14,14 @@ export default defineConfig({
         },
       },
       {
+        // The fake issuer runs in apps' tests under workerd too.
+        plugins: [cloudflareTest({ miniflare: { compatibilityDate: '2026-11-23' } })],
+        test: {
+          name: 'workerd',
+          include: ['tests/oidc-testing.test.ts'],
+        },
+      },
+      {
         // The outbox on real D1, in workerd.
         plugins: [
           cloudflareTest({
