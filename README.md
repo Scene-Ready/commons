@@ -15,7 +15,7 @@ Shared code for Scene Ready apps: cross-app references, the event standard and i
 | `@scene-ready/commons/oidc/follow`   | `followStep`, Org follow (home ADR 0002) as one pure function: given a session's `FollowRecord` and what just happened, what to do next and the new record                                                                                                                                                                                                                        | anywhere      |
 | `@scene-ready/commons/oidc/testing`  | For apps' tests only: `createFakeIssuer`, an OIDC issuer behind a `fetch` that signs tokens with chosen claims and scripts authorize, token, userinfo and set-active-org outcomes                                                                                                                                                                                                 | anywhere      |
 
-"anywhere" means Workers, Node and browsers. Of the OIDC entry points, `oidc/claims`, `oidc/follow` and `oidc/testing` run in browsers; `oidc` does not, because it holds the client secret.
+"anywhere" means Workers, Node and browsers.
 
 The standards these modules enforce are in [`docs/contracts/`](docs/contracts/): the [API standard](docs/contracts/api-standard.md) and the [event standard](docs/contracts/event-standard.md). The overall design is the doc **Scene Ready — Cross-App Data Sharing Standard**.
 
