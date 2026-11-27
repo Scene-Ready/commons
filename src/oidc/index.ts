@@ -13,6 +13,7 @@ import { createRemoteJWKSet, customFetch as joseFetch, errors, jwtVerify } from 
 import { parseIdentity, type Entitlements, type Identity, type TokenSet } from './claims';
 
 export * from './claims';
+export * from './follow';
 
 export interface OidcClientConfig {
   /** Auth's issuer identifier, an https URL. */
