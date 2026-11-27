@@ -84,7 +84,7 @@ None of these throws because of the Hub. A rejected event stays in `outbox_event
 
 ## What belongs here
 
-A module belongs in commons when **two or more apps use it**, it holds **no app's domain logic**, and it holds **no state of its own** (a table it defines is the app's, in the app's database, migrated by the app; [ADR-0005](docs/adr/0005-modules-may-define-app-owned-tables.md)). Each app keeps its own bindings, secrets and configuration; nothing here reads an environment variable. Everything else stays in the app.
+A module belongs in commons when **two or more apps use it**, it holds **no app's domain logic**, and it holds **no state of its own** (a table it defines is the app's, in the app's database, migrated by the app; [ADR-0005](docs/adr/0005-modules-may-define-app-owned-tables.md); an in-memory cache of what it can fetch again is not state; [ADR-0008](docs/adr/0008-oidc-claim-types-in-commons-storage-in-apps.md)). Each app keeps its own bindings, secrets and configuration; nothing here reads an environment variable. Everything else stays in the app.
 
 Planned next, each behind its own entry point: `m2m` (API errors; client-credentials tokens are `oidc`'s `clientCredentialsToken`), `outbox/do` (the outbox for Durable Objects) and `feedback` (the feedback server helper, with the dialog at `feedback/react`, per the feedback repo's spec 002).
 

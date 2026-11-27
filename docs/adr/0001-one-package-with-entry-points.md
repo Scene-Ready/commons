@@ -8,7 +8,7 @@ Code that two or more Scene Ready apps use lives in one package, `@scene-ready/c
 
 Apps install shared code from git tags, and npm installs only a repo's root package, so several packages would mean several repos, or a private registry with tokens in every app's CI. One repo keeps one CI setup, one release and one changelog for a solo developer. Entry points keep each app's bundle to what it imports, and optional peer dependencies (React) keep installs small.
 
-A module belongs here when two or more apps use it, it holds no app's domain logic, and it holds no state of its own. It may define a table that the app owns, that lives in the app's database and that the app migrates ([ADR-0005](0005-modules-may-define-app-owned-tables.md)). Bindings, secrets and configuration stay in each app.
+A module belongs here when two or more apps use it, it holds no app's domain logic, and it holds no state of its own. It may define a table that the app owns, that lives in the app's database and that the app migrates ([ADR-0005](0005-modules-may-define-app-owned-tables.md)), and keep an in-memory cache of what it can fetch again ([ADR-0008](0008-oidc-claim-types-in-commons-storage-in-apps.md)). Bindings, secrets and configuration stay in each app.
 
 ## Consequences
 
