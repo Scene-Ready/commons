@@ -10,7 +10,7 @@
  */
 import * as oauth from 'oauth4webapi';
 import { createRemoteJWKSet, customFetch as joseFetch, errors, jwtVerify } from 'jose';
-import { parseIdentity, type Identity, type TokenSet } from './claims';
+import { parseIdentity, type Entitlements, type Identity, type TokenSet } from './claims';
 
 export * from './claims';
 
@@ -65,6 +65,23 @@ export type RevokeResult = { ok: true } | { ok: false; reason: 'unavailable' };
 
 export type EndSessionUrlResult = { ok: true; url: string } | { ok: false; reason: 'unavailable' };
 
+/** A verified access token: who it is for and what it allows. */
+export interface VerifiedAccessToken {
+  /** The user, or for an app-to-app token the calling client. */
+  subject: string;
+  /** The client the token was issued to. */
+  clientId: string;
+  scopes: string[];
+  /** The user's entitlements in their Active Org; null for app-to-app tokens or without an Active Org. */
+  entitlements: Entitlements | null;
+}
+
+export type VerifyAccessTokenResult =
+  ({ ok: true } & VerifiedAccessToken) | { ok: false; reason: 'invalid' | 'unavailable' };
+
+export type ClientCredentialsTokenResult =
+  { ok: true; accessToken: string; expiresAt: number } | { ok: false; reason: 'unavailable' };
+
 export interface OidcClient {
   /**
    * The authorize URL to send the browser to, and the pending sign-in to keep
@@ -109,9 +126,31 @@ export interface OidcClient {
   }): Promise<EndSessionUrlResult>;
   /** Revokes a refresh token. A failure must not block sign-out: this never throws. */
   revoke(refreshToken: string): Promise<RevokeResult>;
+  /**
+   * Checks a JWT access token sent to this app's API, locally against the
+   * cached JWKS: signature, issuer, expiry, and an `aud` that includes one of
+   * this client's `resources`. `unavailable` only when discovery or the JWKS
+   * can't be fetched. Throws when the client has no `resources`.
+   */
+  verifyAccessToken(token: string): Promise<VerifyAccessTokenResult>;
+  /**
+   * An app-to-app access token for another app's API (`audience`, its
+   * registered resource), from the client-credentials grant. Kept in memory per
+   * audience and scopes until 60 s before it expires; concurrent callers share
+   * one request. `unavailable` for a network error or a 5xx; any OAuth error
+   * from auth (`invalid_client`, `invalid_scope`, ...) is misconfiguration and
+   * throws.
+   */
+  clientCredentialsToken(options: {
+    audience: string;
+    scopes: string[];
+  }): Promise<ClientCredentialsTokenResult>;
 }
 
 type JWKS = ReturnType<typeof createRemoteJWKSet>;
+
+/** An app-to-app token is minted anew this long before it expires. */
+const CLIENT_CREDENTIALS_SKEW_MS = 60_000;
 
 /** A pending sign-in older than this is `invalid`. */
 const PENDING_MAX_AGE_MS = 10 * 60_000;
@@ -135,6 +174,12 @@ export function createOidcClient(config: OidcClientConfig): OidcClient {
   // auth's Organizations API sits on its origin, outside the issuer path, and
   // isn't in discovery (auth integration guide §11b).
   const activeOrgEndpoint = new URL('/api/oidc/organizations/active', issuer);
+
+  /** App-to-app tokens by audience and scopes: the only state commons keeps. */
+  const clientCredentials = new Map<
+    string,
+    Promise<{ accessToken: string; expiresAt: number } | null>
+  >();
 
   /** Discovery and JWKS, cached for the isolate's lifetime once discovery succeeds. */
   let metadata: Promise<{
@@ -164,6 +209,47 @@ export function createOidcClient(config: OidcClientConfig): OidcClient {
     // A failed discovery is retried on the next call, not cached.
     metadata.catch(() => (metadata = null));
     return metadata;
+  }
+
+  /**
+   * A client-credentials token for `audience`, or null when auth can't be
+   * reached. Throws on an OAuth error: with no user involved, it is misconfiguration.
+   */
+  async function mintClientCredentials(audience: string, scope: string) {
+    const found = await discovered();
+    if (!found) return null;
+    const parameters = new URLSearchParams({ resource: audience });
+    if (scope) parameters.set('scope', scope);
+    let response: Response;
+    try {
+      response = await oauth.clientCredentialsGrantRequest(
+        found.as,
+        client,
+        clientAuth,
+        parameters,
+        { [oauth.customFetch]: fetch },
+      );
+    } catch {
+      return null;
+    }
+    if (response.status >= 500) return null;
+    let body: oauth.TokenEndpointResponse;
+    try {
+      body = await oauth.processClientCredentialsResponse(found.as, client, response);
+    } catch (error) {
+      if (error instanceof oauth.ResponseBodyError) {
+        throw new Error(
+          `clientCredentialsToken: auth refused the request (${error.error}): check the client and its grants for ${audience}`,
+          { cause: error },
+        );
+      }
+      // A malformed answer: auth misbehaving.
+      return null;
+    }
+    return {
+      accessToken: body.access_token,
+      expiresAt: Date.now() + (body.expires_in ?? 0) * 1000,
+    };
   }
 
   /** Discovery, or null when it can't be fetched: callers answer `unavailable`. */
@@ -375,6 +461,80 @@ export function createOidcClient(config: OidcClientConfig): OidcClient {
       } catch {
         return { ok: false, reason: 'unavailable' };
       }
+    },
+
+    async verifyAccessToken(token) {
+      if (resources.length === 0) {
+        throw new TypeError('verifyAccessToken: the client has no resources to check aud against');
+      }
+      const found = await discovered();
+      if (!found) return { ok: false, reason: 'unavailable' };
+      let payload: Record<string, unknown>;
+      try {
+        ({ payload } = await jwtVerify(token, found.jwks, {
+          issuer: found.as.issuer,
+          // jose accepts the token when its `aud` includes any of these.
+          audience: resources,
+          clockTolerance: CLOCK_TOLERANCE_S,
+          requiredClaims: ['exp', 'sub', 'client_id'],
+        }));
+      } catch (error) {
+        return { ok: false, reason: jwksUnreachable(error) ? 'unavailable' : 'invalid' };
+      }
+      const { sub, client_id, scope } = payload;
+      if (
+        typeof sub !== 'string' ||
+        sub === '' ||
+        typeof client_id !== 'string' ||
+        (scope !== undefined && typeof scope !== 'string')
+      ) {
+        return { ok: false, reason: 'invalid' };
+      }
+      return {
+        ok: true,
+        subject: sub,
+        clientId: client_id,
+        scopes: scope ? scope.split(' ').filter(Boolean) : [],
+        entitlements: parseIdentity({
+          sub,
+          'urn:auth:entitlements': payload['urn:auth:entitlements'],
+        }).entitlements,
+      };
+    },
+
+    async clientCredentialsToken({ audience, scopes }) {
+      absoluteUrl(audience, 'audience', 'clientCredentialsToken');
+      if (
+        !Array.isArray(scopes) ||
+        !scopes.every((s) => typeof s === 'string' && /^\S+$/.test(s))
+      ) {
+        throw new TypeError('clientCredentialsToken: scopes must be an array of scope names');
+      }
+      const scope = [...new Set(scopes)].sort().join(' ');
+      const key = `${audience} ${scope}`;
+      let entry = clientCredentials.get(key);
+      if (entry) {
+        // A failed request is dropped once it settles, so an entry is either in
+        // flight or a token: concurrent callers share the request and its outcome.
+        const token = await entry;
+        if (!token) return { ok: false, reason: 'unavailable' };
+        if (token.expiresAt - Date.now() > CLIENT_CREDENTIALS_SKEW_MS)
+          return { ok: true, ...token };
+        if (clientCredentials.get(key) === entry) clientCredentials.delete(key);
+      }
+      entry = clientCredentials.get(key);
+      if (!entry) {
+        const minting = mintClientCredentials(audience, scope);
+        clientCredentials.set(key, minting);
+        // A failed request isn't kept: the next call tries again.
+        const drop = () => {
+          if (clientCredentials.get(key) === minting) clientCredentials.delete(key);
+        };
+        minting.then((token) => token ?? drop(), drop);
+        entry = minting;
+      }
+      const token = await entry;
+      return token ? { ok: true, ...token } : { ok: false, reason: 'unavailable' };
     },
 
     async userInfo(accessToken) {

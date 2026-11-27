@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createOidcClient, type OidcClientConfig, type PendingSignIn } from '../src/oidc';
 import { createFakeIssuer, type FakeIssuer } from '../src/oidc/testing';
 
@@ -648,5 +648,304 @@ describe('revoke', () => {
       },
     });
     expect(await client.revoke('rt')).toEqual({ ok: false, reason: 'unavailable' });
+  });
+});
+
+describe('verifyAccessToken', () => {
+  const RIG = 'https://rig.example';
+  const entitlements = {
+    organizationId: 'org_a',
+    role: 'member',
+    products: { rig: { tier: 'pro', capabilities: ['rigs.edit'], limits: { rigs: null } } },
+    unseatedProducts: [],
+  };
+
+  function api() {
+    return setup({ resources: [RIG] });
+  }
+
+  it('returns the subject, client id, scopes and entitlements of a valid token', async () => {
+    const { issuer, client } = api();
+    const token = await issuer.accessToken(
+      {
+        sub: 'usr_1',
+        client_id: 'rig-web',
+        scope: 'openid rigs:read',
+        'urn:auth:entitlements': entitlements,
+      },
+      { aud: RIG },
+    );
+    expect(await client.verifyAccessToken(token)).toEqual({
+      ok: true,
+      subject: 'usr_1',
+      clientId: 'rig-web',
+      scopes: ['openid', 'rigs:read'],
+      entitlements,
+    });
+  });
+
+  it('passes a token whose aud is an array that includes the resource', async () => {
+    const { issuer, client } = api();
+    const token = await issuer.accessToken(
+      { sub: 'usr_1', client_id: 'rig-web' },
+      { aud: ['https://feedback.example', RIG] },
+    );
+    expect(await client.verifyAccessToken(token)).toEqual({
+      ok: true,
+      subject: 'usr_1',
+      clientId: 'rig-web',
+      scopes: [],
+      entitlements: null,
+    });
+  });
+
+  it('verifies the tokens a sign-in gets for the resource', async () => {
+    const { issuer, client } = api();
+    issuer.nextToken({ claims: { sub: 'usr_1', 'urn:auth:entitlements': entitlements } });
+    const { url, pending } = await start(client);
+    const signedIn = await client.finishSignIn(await follow(issuer, url), pending);
+    if (!signedIn.ok) throw new Error(signedIn.reason);
+    expect(await client.verifyAccessToken(signedIn.tokens.accessToken)).toMatchObject({
+      ok: true,
+      subject: 'usr_1',
+      clientId: 'rig',
+      entitlements,
+    });
+  });
+
+  describe('answers invalid', () => {
+    it('for a token for another audience', async () => {
+      const { issuer, client } = api();
+      const token = await issuer.accessToken(
+        { sub: 'usr_1', client_id: 'x' },
+        { aud: 'https://feedback.example' },
+      );
+      expect(await client.verifyAccessToken(token)).toEqual({ ok: false, reason: 'invalid' });
+    });
+
+    it('for a token signed by another key', async () => {
+      const { client } = api();
+      const impostor = createFakeIssuer({ issuer: ISSUER });
+      const token = await impostor.accessToken({ sub: 'usr_1', client_id: 'x' }, { aud: RIG });
+      expect(await client.verifyAccessToken(token)).toEqual({ ok: false, reason: 'invalid' });
+    });
+
+    it('for a token whose payload was changed after signing', async () => {
+      const { issuer, client } = api();
+      const [header, , signature] = (
+        await issuer.accessToken({ sub: 'usr_1', client_id: 'x' }, { aud: RIG })
+      ).split('.');
+      const other = await issuer.accessToken({ sub: 'usr_admin', client_id: 'x' }, { aud: RIG });
+      const forged = `${header}.${other.split('.')[1]}.${signature}`;
+      expect(await client.verifyAccessToken(forged)).toEqual({ ok: false, reason: 'invalid' });
+    });
+
+    it('for a token from another issuer', async () => {
+      const { issuer, client } = api();
+      const token = await issuer.accessToken(
+        { iss: 'https://other.test', sub: 'usr_1', client_id: 'x' },
+        { aud: RIG },
+      );
+      expect(await client.verifyAccessToken(token)).toEqual({ ok: false, reason: 'invalid' });
+    });
+
+    it('for an expired token', async () => {
+      const { issuer, client } = api();
+      const now = Math.floor(Date.now() / 1000);
+      const token = await issuer.accessToken(
+        { sub: 'usr_1', client_id: 'x', iat: now - 3600, exp: now - 60 },
+        { aud: RIG },
+      );
+      expect(await client.verifyAccessToken(token)).toEqual({ ok: false, reason: 'invalid' });
+    });
+
+    it('for a token without client_id, or that is not a JWT', async () => {
+      const { issuer, client } = api();
+      const token = await issuer.accessToken({ sub: 'usr_1' }, { aud: RIG });
+      expect(await client.verifyAccessToken(token)).toEqual({ ok: false, reason: 'invalid' });
+      expect(await client.verifyAccessToken('opaque')).toEqual({ ok: false, reason: 'invalid' });
+    });
+  });
+
+  it('makes no network call beyond discovery and the JWKS, once cached', async () => {
+    const issuer = createFakeIssuer({ issuer: ISSUER });
+    const urls: string[] = [];
+    const { client } = setup({
+      resources: [RIG],
+      fetch: (input, init) => {
+        urls.push(new Request(input, init).url);
+        return issuer.fetch(input, init);
+      },
+    });
+    const token = await issuer.accessToken({ sub: 'usr_1', client_id: 'x' }, { aud: RIG });
+    await client.verifyAccessToken(token);
+    await client.verifyAccessToken(token);
+    expect(urls).toEqual([`${ISSUER}/.well-known/openid-configuration`, `${ISSUER}/jwks`]);
+  });
+
+  it('answers unavailable when the JWKS answers 5xx', async () => {
+    const issuer = createFakeIssuer({ issuer: ISSUER });
+    const { client } = setup({
+      resources: [RIG],
+      fetch: (input, init) =>
+        new Request(input, init).url.endsWith('/jwks')
+          ? Promise.resolve(new Response(null, { status: 503 }))
+          : issuer.fetch(input, init),
+    });
+    const token = await issuer.accessToken({ sub: 'usr_1', client_id: 'x' }, { aud: RIG });
+    expect(await client.verifyAccessToken(token)).toEqual({ ok: false, reason: 'unavailable' });
+  });
+
+  it('throws when the client has no resources', async () => {
+    const { client } = setup();
+    await expect(client.verifyAccessToken('x')).rejects.toThrow(/resources/);
+  });
+});
+
+describe('clientCredentialsToken', () => {
+  const FEEDBACK = 'https://feedback.example';
+
+  function counted() {
+    const issuer = createFakeIssuer({ issuer: ISSUER });
+    const tokenRequests: URLSearchParams[] = [];
+    const { client } = setup({
+      fetch: async (input, init) => {
+        const request = new Request(input, init);
+        if (request.url === `${ISSUER}/oauth2/token`) {
+          tokenRequests.push(new URLSearchParams(await request.clone().text()));
+        }
+        return issuer.fetch(request);
+      },
+    });
+    return { issuer, client, tokenRequests };
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('mints a token for the audience and scopes, which the audience can verify', async () => {
+    const { issuer, client, tokenRequests } = counted();
+    const result = await client.clientCredentialsToken({
+      audience: FEEDBACK,
+      scopes: ['feedback:write'],
+    });
+    expect(result).toMatchObject({ ok: true, accessToken: expect.any(String) });
+    if (!result.ok) return;
+    expect(result.expiresAt).toBeGreaterThan(Date.now() + 3500_000);
+    expect(tokenRequests[0].get('grant_type')).toBe('client_credentials');
+    expect(tokenRequests[0].get('resource')).toBe(FEEDBACK);
+    expect(tokenRequests[0].get('scope')).toBe('feedback:write');
+
+    const feedback = createOidcClient({
+      issuer: ISSUER,
+      clientId: 'feedback',
+      clientSecret: 's3cret',
+      redirectUri: 'https://feedback.example/callback',
+      scopes: [],
+      resources: [FEEDBACK],
+      fetch: issuer.fetch,
+    });
+    expect(await feedback.verifyAccessToken(result.accessToken)).toEqual({
+      ok: true,
+      subject: 'rig',
+      clientId: 'rig',
+      scopes: ['feedback:write'],
+      entitlements: null,
+    });
+  });
+
+  it('reuses the token per audience, and shares one request between concurrent callers', async () => {
+    const { client, tokenRequests } = counted();
+    const options = { audience: FEEDBACK, scopes: ['feedback:write'] };
+    const [a, b] = await Promise.all([
+      client.clientCredentialsToken(options),
+      client.clientCredentialsToken(options),
+    ]);
+    const c = await client.clientCredentialsToken(options);
+    expect(tokenRequests).toHaveLength(1);
+    expect(b).toEqual(a);
+    expect(c).toEqual(a);
+
+    const other = await client.clientCredentialsToken({
+      audience: 'https://platform.example',
+      scopes: [],
+    });
+    expect(tokenRequests).toHaveLength(2);
+    expect(other).not.toEqual(a);
+  });
+
+  it('mints a new token 60 s before the cached one expires', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const start = Date.now();
+    const { issuer, client, tokenRequests } = counted();
+    issuer.nextToken({ expiresIn: 600 });
+    const options = { audience: FEEDBACK, scopes: [] };
+    const first = await client.clientCredentialsToken(options);
+
+    vi.setSystemTime(start + 540_000 - 1);
+    expect(await client.clientCredentialsToken(options)).toEqual(first);
+    expect(tokenRequests).toHaveLength(1);
+
+    vi.setSystemTime(start + 540_000);
+    const second = await client.clientCredentialsToken(options);
+    expect(tokenRequests).toHaveLength(2);
+    expect(second).not.toEqual(first);
+  });
+
+  it('answers a 5xx as unavailable, keeps nothing, and tries again next time', async () => {
+    const { issuer, client, tokenRequests } = counted();
+    issuer.nextToken({ status: 503 });
+    const options = { audience: FEEDBACK, scopes: [] };
+    expect(await client.clientCredentialsToken(options)).toEqual({
+      ok: false,
+      reason: 'unavailable',
+    });
+    expect(await client.clientCredentialsToken(options)).toMatchObject({ ok: true });
+    expect(tokenRequests).toHaveLength(2);
+  });
+
+  it('gives concurrent callers of a failing request one unavailable, not a retry each', async () => {
+    const { issuer, client, tokenRequests } = counted();
+    issuer.nextToken({ status: 503 });
+    const options = { audience: FEEDBACK, scopes: [] };
+    const results = await Promise.all([
+      client.clientCredentialsToken(options),
+      client.clientCredentialsToken(options),
+    ]);
+    expect(results).toEqual([
+      { ok: false, reason: 'unavailable' },
+      { ok: false, reason: 'unavailable' },
+    ]);
+    expect(tokenRequests).toHaveLength(1);
+  });
+
+  it('answers a network failure as unavailable', async () => {
+    const issuer = createFakeIssuer({ issuer: ISSUER });
+    const { client } = setup({
+      fetch: (input, init) =>
+        new Request(input, init).url.endsWith('/oauth2/token')
+          ? Promise.reject(new TypeError('fetch failed'))
+          : issuer.fetch(input, init),
+    });
+    expect(await client.clientCredentialsToken({ audience: FEEDBACK, scopes: [] })).toEqual({
+      ok: false,
+      reason: 'unavailable',
+    });
+  });
+
+  it('throws when auth refuses the request: misconfiguration', async () => {
+    const { issuer, client } = counted();
+    issuer.nextToken({ error: 'invalid_scope' });
+    await expect(
+      client.clientCredentialsToken({ audience: FEEDBACK, scopes: ['admin'] }),
+    ).rejects.toThrow(/invalid_scope/);
+  });
+
+  it('throws for an audience that is not an absolute URL', async () => {
+    const { client } = setup();
+    await expect(
+      client.clientCredentialsToken({ audience: 'feedback', scopes: [] }),
+    ).rejects.toThrow(/audience/);
   });
 });
