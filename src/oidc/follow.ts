@@ -7,15 +7,21 @@
 const MINUTE = 60_000;
 
 /** Auth is checked at most this often per session (ADR 0002 "Apps poll"). */
-export const FOLLOW_CHECK_INTERVAL_MS = 5 * MINUTE;
+const CHECK_INTERVAL_MS = 5 * MINUTE;
 
 /** The wait after the 1st, 2nd and 3rd-or-later temporary failure in a row. */
-export const FOLLOW_BACKOFF_MS: readonly number[] = [5 * MINUTE, 15 * MINUTE, 60 * MINUTE];
+const BACKOFF_MS = [5 * MINUTE, 15 * MINUTE, 60 * MINUTE] as const;
 
-/** `followStep` reports temporary failures from this many in a row. */
-export const FOLLOW_REPORT_AFTER_FAILURES = 2;
+/** Temporary failures are reported from this many in a row. */
+const REPORT_AFTER_FAILURES = 2;
 
 export type TemporaryFollowFailure = 'unavailable' | 'no_token';
+
+/** Where the silent sign-in of a follow was meant to land, and where it did (null for no org). */
+export interface Landing {
+  expectedOrgId: string;
+  landedOrgId: string | null;
+}
 
 /**
  * What a session remembers about Org follow. Plain JSON; times are epoch ms.
@@ -26,31 +32,30 @@ export interface FollowRecord {
   /** The last check, whether it succeeded or failed. */
   lastCheckedAt: number | null;
   /**
-   * A lasting refusal: the silent sign-in to `activeOrgId` landed on
-   * `landedOrgId` instead. Following stops while the Active Org is still
-   * `activeOrgId`.
+   * A lasting refusal: the landing that missed. Following stops while the
+   * Active Org is still `expectedOrgId`.
    */
-  refused: { activeOrgId: string; landedOrgId: string | null } | null;
+  refused: Landing | null;
   /** The run of temporary failures in a row; checks wait until `retryAt`. */
   failures: { reason: TemporaryFollowFailure; count: number; retryAt: number } | null;
 }
 
 export type FollowInput =
-  /** The app loaded, or its window got focus. */
+  /** The app loaded, or its window got focus. Both are treated alike. */
   | { type: 'due'; trigger: 'load' | 'focus' }
   /** A check succeeded: the session's org and auth's Active Org (from userinfo), null for none. */
   | { type: 'checked'; sessionOrgId: string | null; activeOrgId: string | null }
   /** A check failed for a temporary reason. A 401 is not this: refresh, then sign in silently. */
   | { type: 'check_failed'; reason: TemporaryFollowFailure }
-  /** The silent sign-in of a follow finished, in `landedOrgId` (null for no org). */
-  | { type: 'landed'; expectedOrgId: string; landedOrgId: string | null };
+  /** The silent sign-in of a follow finished. */
+  | ({ type: 'landed' } & Landing);
 
 export type FollowAction =
   /** Check auth's Active Org now (userinfo), then send `checked` or `check_failed`. */
   | { type: 'check' }
   /** Nothing to do now. */
   | { type: 'skip' }
-  /** The session is where it should be; keep it. */
+  /** The session is where it should be, or can't follow; keep it. */
   | { type: 'stay' }
   /** Save pending work, end the session and sign in silently; then send `landed`. */
   | { type: 'follow'; orgId: string }
@@ -64,20 +69,28 @@ export interface FollowStep {
   record: FollowRecord;
 }
 
-const EMPTY: FollowRecord = { lastCheckedAt: null, refused: null, failures: null };
+const INITIAL_RECORD: FollowRecord = { lastCheckedAt: null, refused: null, failures: null };
+
+/** The record after a check or landing at `now`, holding only `refused`. */
+function checkedAt(now: number, refused: Landing | null = null): FollowRecord {
+  return { lastCheckedAt: now, refused, failures: null };
+}
 
 /**
  * One step of Org follow: given a session's follow record, what just happened
  * and the time, what the app does next and the record to store.
  *
  * - `due` answers `check`, or `skip` within 5 minutes of the last check or
- *   while backing off. Load and focus are treated alike.
+ *   while backing off. A last check in the future (another machine's clock)
+ *   holds nothing back.
  * - `checked` answers `not_provisioned` with no Active Org, `stay` when the
  *   session is in it, otherwise `follow`, unless a lasting refusal for that
- *   same Active Org stands (then `stay`). The record clears when the Active
- *   Org changes.
+ *   same Active Org stands (then `stay`, silently: it was reported when it
+ *   happened, and stays readable as `record.refused`). The refusal clears on
+ *   the first check that sees another Active Org or the session in it; a
+ *   change and a change back between two checks can't be seen, so it stands.
  * - `check_failed` backs off 5, 15, then 60 minutes, and answers `report` from
- *   the second failure in a row (`skip` before it).
+ *   the second failure in a row, whatever the reasons (`skip` before it).
  * - `landed` answers `stay` in the expected org; elsewhere it records a
  *   lasting refusal and answers `report` at once.
  */
@@ -87,46 +100,45 @@ export function followStep(
   now: number,
 ): FollowStep {
   if (!Number.isFinite(now)) throw new TypeError('followStep: now must be epoch ms');
-  const current = record ?? EMPTY;
+  const current = record ?? INITIAL_RECORD;
 
   switch (input.type) {
     case 'due': {
       const { lastCheckedAt, failures } = current;
-      // A last check in the future (another isolate's clock) doesn't hold checks back.
-      const recent =
-        lastCheckedAt !== null &&
-        lastCheckedAt <= now &&
-        now - lastCheckedAt < FOLLOW_CHECK_INTERVAL_MS;
-      const backingOff = failures !== null && now < failures.retryAt;
-      return { action: { type: recent || backingOff ? 'skip' : 'check' }, record: current };
+      // `retryAt` is set from the same clock as `lastCheckedAt`, so a last
+      // check in the future discounts both the cap and the back-off.
+      if (lastCheckedAt === null || lastCheckedAt > now) {
+        return { action: { type: 'check' }, record: current };
+      }
+      const until = Math.max(lastCheckedAt + CHECK_INTERVAL_MS, failures?.retryAt ?? 0);
+      return { action: { type: now < until ? 'skip' : 'check' }, record: current };
     }
 
     case 'checked': {
       const { sessionOrgId, activeOrgId } = input;
-      // A successful check ends a run of temporary failures. A lasting refusal
-      // holds only while the Active Org is the one it was for and the session
-      // is not in it; otherwise the record clears.
+      // A successful check ends a run of temporary failures.
       const refused =
-        current.refused?.activeOrgId === activeOrgId && sessionOrgId !== activeOrgId
+        current.refused?.expectedOrgId === activeOrgId && sessionOrgId !== activeOrgId
           ? current.refused
           : null;
-      const next: FollowRecord = { lastCheckedAt: now, refused, failures: null };
+      const next = checkedAt(now, refused);
       if (activeOrgId === null) return { action: { type: 'not_provisioned' }, record: next };
-      if (sessionOrgId === activeOrgId || refused)
+      if (sessionOrgId === activeOrgId || refused) {
         return { action: { type: 'stay' }, record: next };
+      }
       return { action: { type: 'follow', orgId: activeOrgId }, record: next };
     }
 
     case 'check_failed': {
       const count = (current.failures?.count ?? 0) + 1;
-      const wait = FOLLOW_BACKOFF_MS[Math.min(count, FOLLOW_BACKOFF_MS.length) - 1]!;
+      const wait = BACKOFF_MS[Math.min(count, BACKOFF_MS.length) - 1]!;
       const next: FollowRecord = {
         ...current,
         lastCheckedAt: now,
         failures: { reason: input.reason, count, retryAt: now + wait },
       };
       const action: FollowAction =
-        count >= FOLLOW_REPORT_AFTER_FAILURES
+        count >= REPORT_AFTER_FAILURES
           ? { type: 'report', reason: input.reason }
           : { type: 'skip' };
       return { action, record: next };
@@ -134,19 +146,11 @@ export function followStep(
 
     case 'landed': {
       const { expectedOrgId, landedOrgId } = input;
-      if (landedOrgId === expectedOrgId) {
-        return {
-          action: { type: 'stay' },
-          record: { lastCheckedAt: now, refused: null, failures: null },
-        };
-      }
+      if (landedOrgId === expectedOrgId)
+        return { action: { type: 'stay' }, record: checkedAt(now) };
       return {
         action: { type: 'report', reason: 'landed_elsewhere' },
-        record: {
-          lastCheckedAt: now,
-          refused: { activeOrgId: expectedOrgId, landedOrgId },
-          failures: null,
-        },
+        record: checkedAt(now, { expectedOrgId, landedOrgId }),
       };
     }
   }

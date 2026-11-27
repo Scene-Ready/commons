@@ -42,6 +42,10 @@
       "types": "./dist/oidc/claims.d.ts",
       "default": "./dist/oidc/claims.js"
     },
+    "./oidc/follow": {
+      "types": "./dist/oidc/follow.d.ts",
+      "default": "./dist/oidc/follow.js"
+    },
     "./oidc/testing": {
       "types": "./dist/oidc/testing.d.ts",
       "default": "./dist/oidc/testing.js"

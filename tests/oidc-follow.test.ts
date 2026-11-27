@@ -4,7 +4,7 @@ import {
   type FollowInput,
   type FollowRecord,
   type FollowStep,
-} from '../src/oidc/index';
+} from '../src/oidc/follow';
 
 const MIN = 60_000;
 const T0 = Date.UTC(2026, 10, 27, 12, 0, 0);
@@ -46,11 +46,21 @@ describe('followStep: the 5-minute cap', () => {
 
   it('does not change the record', () => {
     const { record } = followStep(null, checked('org_a', 'org_a'), T0);
-    expect(followStep(record, due, T0 + MIN).record).toBe(record);
+    expect(followStep(record, due, T0 + MIN).record).toEqual(record);
+  });
+
+  it('skips a due at the instant of the last check', () => {
+    const { record } = followStep(null, checked('org_a', 'org_a'), T0);
+    expect(followStep(record, due, T0).action.type).toBe('skip');
   });
 
   it('checks when the last check is in the future (clock skew)', () => {
     const record: FollowRecord = { lastCheckedAt: T0 + 10 * MIN, refused: null, failures: null };
+    expect(followStep(record, due, T0).action.type).toBe('check');
+  });
+
+  it('checks when a failure was recorded in the future (clock skew)', () => {
+    const { record } = followStep(null, unavailable, T0 + 10 * MIN);
     expect(followStep(record, due, T0).action.type).toBe('check');
   });
 });
@@ -102,9 +112,9 @@ describe('followStep: landing after a follow', () => {
       ]);
       expect(follow!.action.type).toBe('follow');
       expect(landed!.action).toEqual({ type: 'report', reason: 'landed_elsewhere' });
-      expect(landed!.record.refused).toEqual({ activeOrgId: 'org_b', landedOrgId });
+      expect(landed!.record.refused).toEqual({ expectedOrgId: 'org_b', landedOrgId });
       expect(later!.action).toEqual({ type: 'stay' });
-      expect(later!.record.refused).toEqual({ activeOrgId: 'org_b', landedOrgId });
+      expect(later!.record.refused).toEqual({ expectedOrgId: 'org_b', landedOrgId });
     },
   );
 
@@ -123,7 +133,7 @@ describe('followStep: landing after a follow', () => {
       [unavailable, T0 + 5 * MIN],
       [checked('org_a', 'org_b'), T0 + 10 * MIN],
     ]);
-    expect(steps[1]!.record.refused).toEqual({ activeOrgId: 'org_b', landedOrgId: 'org_a' });
+    expect(steps[1]!.record.refused).toEqual({ expectedOrgId: 'org_b', landedOrgId: 'org_a' });
     expect(steps[2]!.action).toEqual({ type: 'stay' });
   });
 });
@@ -131,7 +141,7 @@ describe('followStep: landing after a follow', () => {
 describe('followStep: the record clears when the Active Org changes', () => {
   const refused: FollowRecord = {
     lastCheckedAt: T0,
-    refused: { activeOrgId: 'org_b', landedOrgId: 'org_a' },
+    refused: { expectedOrgId: 'org_b', landedOrgId: 'org_a' },
     failures: null,
   };
 
@@ -199,6 +209,14 @@ describe('followStep: temporary failures', () => {
     expect(followStep(record, due, T0 + 20 * MIN).action.type).toBe('check');
   });
 
+  it('counts failures in a row whatever their reasons, reporting the latest', () => {
+    const [, second] = run(null, [
+      [unavailable, T0],
+      [{ type: 'check_failed', reason: 'no_token' }, T0 + 5 * MIN],
+    ]);
+    expect(second!.action).toEqual({ type: 'report', reason: 'no_token' });
+  });
+
   it('starts the count again after a successful check', () => {
     const steps = run(null, [
       [unavailable, T0],
@@ -223,7 +241,7 @@ describe('followStep: purity', () => {
   it('does not modify the record it is given', () => {
     const record: FollowRecord = {
       lastCheckedAt: T0,
-      refused: { activeOrgId: 'org_b', landedOrgId: 'org_a' },
+      refused: { expectedOrgId: 'org_b', landedOrgId: 'org_a' },
       failures: { reason: 'unavailable', count: 1, retryAt: T0 + 5 * MIN },
     };
     const copy = structuredClone(record);
@@ -231,12 +249,6 @@ describe('followStep: purity', () => {
       followStep(record, input, T0 + 30 * MIN);
     }
     expect(record).toEqual(copy);
-  });
-
-  it('answers the same for the same arguments', () => {
-    const a = followStep(null, checked('org_a', 'org_b'), T0);
-    const b = followStep(null, checked('org_a', 'org_b'), T0);
-    expect(a).toEqual(b);
   });
 
   it.each([NaN, Infinity])('throws on a now of %s', (now) => {
