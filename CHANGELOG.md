@@ -2,6 +2,12 @@
 
 Grouped by entry point. Versions follow semver across the whole package.
 
+## 0.10.0 — 2026-11-27
+
+- `oidc`: `clientCredentialsToken`'s `audience` is optional. `clientCredentialsToken({ scopes })` sends no `resource`, so auth issues the opaque token its own app-to-app routes (such as `GET /api/oidc/m2m/organizations/:id/entitlements`) take; they refuse the resource-bound JWT. It is kept per scopes, apart from any audience's. `clientCredentialsToken({ audience, scopes })` is unchanged.
+- `oidc`: `refresh` answers `org_changed` with the verified new `TokenSet`: `{ ok: false, reason: 'org_changed', activeOrgId, tokens }`. auth has already rotated the refresh token by then, so an app that keeps the session in its own Org (for example when `activeOrgId` is null because the user's auth web session ended) stores `tokens`; the old refresh token is spent. Every other result is unchanged.
+- `oidc/testing`: Covered: the fake issuer answers a client-credentials grant without `resource` with an opaque access token that userinfo answers.
+
 ## 0.9.0 — 2026-11-27
 
 - `oidc`: New entry point, the relying party apps sign users in with. `createOidcClient({ issuer, clientId, clientSecret, redirectUri, scopes, resources?, fetch? })` throws on misconfiguration (including an issuer that is not https), adds `openid` to `scopes` when missing and caches discovery and JWKS per client for the isolate's lifetime (a failed discovery is retried; an unknown `kid` refetches the JWKS). `startSignIn({ returnTo, silent? })` answers `{ ok: true, url, pending }` (PKCE S256, `prompt=none` when silent, a `resource` per resource) or `unavailable`; a `returnTo` that is not a same-origin path throws. `finishSignIn(callbackUrl, pending)` exchanges the code with `client_secret_basic` and verifies the ID token's signature (jose, against the JWKS), issuer, audience, expiry and nonce; it answers `{ ok: true, tokens, returnTo }`, `not_signed_in` with `returnTo` for a refused silent sign-in, `denied`, `invalid` (state or nonce mismatch, a tampered pending sign-in or one older than 10 minutes, a refusal of a sign-in that was not silent, a token that fails verification) or `unavailable` (network error, 5xx, or authorize's `server_error` / `temporarily_unavailable`). Re-exports `oidc/claims`. Adds `oauth4webapi` 3 and `jose` 6 as dependencies.

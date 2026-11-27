@@ -391,6 +391,25 @@ describe('createFakeIssuer', () => {
       });
     });
 
+    it('issues an opaque app-to-app token without a resource, which userinfo answers', async () => {
+      const issuer = createFakeIssuer({ issuer: ISSUER });
+      const res = await token(issuer.fetch, {
+        grant_type: 'client_credentials',
+        scope: 'organizations:read',
+      });
+      const body = await res.json();
+      expect(body).toMatchObject({ token_type: 'Bearer', expires_in: 3600 });
+      expect(body.access_token.split('.')).toHaveLength(1);
+      const info = await issuer.fetch(`${ISSUER}/oauth2/userinfo`, {
+        headers: { authorization: `Bearer ${body.access_token}` },
+      });
+      expect(await info.json()).toEqual({
+        sub: 'rig',
+        client_id: 'rig',
+        scope: 'organizations:read',
+      });
+    });
+
     it('ends the session by redirecting to the post-logout URI with the state', async () => {
       const issuer = createFakeIssuer({ issuer: ISSUER });
       const url = new URL(`${ISSUER}/oauth2/end-session`);

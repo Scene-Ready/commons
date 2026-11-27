@@ -379,17 +379,27 @@ describe('refresh', () => {
     });
   });
 
-  it('answers org_changed with the new Active Org and no tokens', async () => {
+  it('answers org_changed with the new Active Org and the new tokens', async () => {
     const { issuer, client, tokens } = await signedIn({
       sub: 'usr_1',
       'urn:auth:entitlements': org('org_a'),
     });
     issuer.nextToken({ claims: { sub: 'usr_1', 'urn:auth:entitlements': org('org_b') } });
-    expect(await client.refresh(tokens)).toEqual({
+    const result = await client.refresh(tokens);
+    expect(result).toMatchObject({
       ok: false,
       reason: 'org_changed',
       activeOrgId: 'org_b',
+      tokens: {
+        claims: { subject: 'usr_1', entitlements: { organizationId: 'org_b' } },
+        refreshToken: expect.any(String),
+      },
     });
+    if (result.ok || result.reason !== 'org_changed') return;
+    // auth has rotated the refresh token: the new one is what refreshes next.
+    expect(result.tokens.refreshToken).not.toBe(tokens.refreshToken);
+    expect(result.tokens.accessToken).not.toBe(tokens.accessToken);
+    expect(await client.refresh(result.tokens)).toMatchObject({ ok: true });
   });
 
   it('answers org_changed with a null activeOrgId when the Active Org is gone', async () => {
@@ -398,10 +408,11 @@ describe('refresh', () => {
       'urn:auth:entitlements': org('org_a'),
     });
     issuer.nextToken({ claims: { sub: 'usr_1' } });
-    expect(await client.refresh(tokens)).toEqual({
+    expect(await client.refresh(tokens)).toMatchObject({
       ok: false,
       reason: 'org_changed',
       activeOrgId: null,
+      tokens: { claims: { subject: 'usr_1', entitlements: null } },
     });
   });
 
@@ -891,6 +902,27 @@ describe('clientCredentialsToken', () => {
     const second = await client.clientCredentialsToken(options);
     expect(tokenRequests).toHaveLength(2);
     expect(second).not.toEqual(first);
+  });
+
+  it('without an audience, sends no resource and keeps a token per scopes apart from audiences', async () => {
+    const { issuer, client, tokenRequests } = counted();
+    const plain = await client.clientCredentialsToken({ scopes: ['b', 'a'] });
+    expect(plain).toMatchObject({ ok: true, accessToken: expect.any(String) });
+    if (!plain.ok) return;
+    expect(tokenRequests[0].has('resource')).toBe(false);
+    expect(tokenRequests[0].get('scope')).toBe('a b');
+    // An opaque token, as auth issues without a resource: auth's own routes take it.
+    const info = await issuer.fetch(`${ISSUER}/oauth2/userinfo`, {
+      headers: { authorization: `Bearer ${plain.accessToken}` },
+    });
+    expect(await info.json()).toMatchObject({ sub: 'rig', scope: 'a b' });
+
+    expect(await client.clientCredentialsToken({ scopes: ['a', 'b'] })).toEqual(plain);
+    expect(tokenRequests).toHaveLength(1);
+    const bound = await client.clientCredentialsToken({ audience: FEEDBACK, scopes: ['a', 'b'] });
+    expect(bound).not.toEqual(plain);
+    expect(tokenRequests).toHaveLength(2);
+    expect(tokenRequests[1].get('resource')).toBe(FEEDBACK);
   });
 
   it('answers a 5xx as unavailable, keeps nothing, and tries again next time', async () => {
