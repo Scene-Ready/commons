@@ -877,17 +877,17 @@ describe('clientCredentialsToken', () => {
 
   it('mints a new token 60 s before the cached one expires', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
-    const start = Date.now();
+    const t0 = Date.now();
     const { issuer, client, tokenRequests } = counted();
     issuer.nextToken({ expiresIn: 600 });
     const options = { audience: FEEDBACK, scopes: [] };
     const first = await client.clientCredentialsToken(options);
 
-    vi.setSystemTime(start + 540_000 - 1);
+    vi.setSystemTime(t0 + 540_000 - 1);
     expect(await client.clientCredentialsToken(options)).toEqual(first);
     expect(tokenRequests).toHaveLength(1);
 
-    vi.setSystemTime(start + 540_000);
+    vi.setSystemTime(t0 + 540_000);
     const second = await client.clientCredentialsToken(options);
     expect(tokenRequests).toHaveLength(2);
     expect(second).not.toEqual(first);
@@ -918,6 +918,35 @@ describe('clientCredentialsToken', () => {
       { ok: false, reason: 'unavailable' },
     ]);
     expect(tokenRequests).toHaveLength(1);
+  });
+
+  it('keeps a token per scope set, so other scopes get their own', async () => {
+    const { client, tokenRequests } = counted();
+    const read = await client.clientCredentialsToken({ audience: FEEDBACK, scopes: ['a', 'b'] });
+    expect(await client.clientCredentialsToken({ audience: FEEDBACK, scopes: ['b', 'a'] })).toEqual(
+      read,
+    );
+    const write = await client.clientCredentialsToken({ audience: FEEDBACK, scopes: ['c'] });
+    expect(write).not.toEqual(read);
+    expect(tokenRequests.map((r) => r.get('scope'))).toEqual(['a b', 'c']);
+  });
+
+  it('answers a 429 as unavailable', async () => {
+    const { issuer, client } = counted();
+    issuer.nextToken({ status: 429 });
+    expect(await client.clientCredentialsToken({ audience: FEEDBACK, scopes: [] })).toEqual({
+      ok: false,
+      reason: 'unavailable',
+    });
+  });
+
+  it('keeps nothing after a request that threw, and tries again', async () => {
+    const { issuer, client, tokenRequests } = counted();
+    issuer.nextToken({ error: 'invalid_client' });
+    const options = { audience: FEEDBACK, scopes: [] };
+    await expect(client.clientCredentialsToken(options)).rejects.toThrow(/invalid_client/);
+    expect(await client.clientCredentialsToken(options)).toMatchObject({ ok: true });
+    expect(tokenRequests).toHaveLength(2);
   });
 
   it('answers a network failure as unavailable', async () => {

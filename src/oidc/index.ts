@@ -137,7 +137,7 @@ export interface OidcClient {
    * An app-to-app access token for another app's API (`audience`, its
    * registered resource), from the client-credentials grant. Kept in memory per
    * audience and scopes until 60 s before it expires; concurrent callers share
-   * one request. `unavailable` for a network error or a 5xx; any OAuth error
+   * one request. `unavailable` for a network error, a 5xx or a 429; any OAuth error
    * from auth (`invalid_client`, `invalid_scope`, ...) is misconfiguration and
    * throws.
    */
@@ -232,7 +232,11 @@ export function createOidcClient(config: OidcClientConfig): OidcClient {
     } catch {
       return null;
     }
-    if (response.status >= 500) return null;
+    // A 5xx is auth being down; a 429 is auth asking us to back off.
+    if (response.status >= 500 || response.status === 429) {
+      await response.body?.cancel();
+      return null;
+    }
     let body: oauth.TokenEndpointResponse;
     try {
       body = await oauth.processClientCredentialsResponse(found.as, client, response);
@@ -511,7 +515,7 @@ export function createOidcClient(config: OidcClientConfig): OidcClient {
         throw new TypeError('clientCredentialsToken: scopes must be an array of scope names');
       }
       const scope = [...new Set(scopes)].sort().join(' ');
-      const key = `${audience} ${scope}`;
+      const key = JSON.stringify([audience, scope]);
       let entry = clientCredentials.get(key);
       if (entry) {
         // A failed request is dropped once it settles, so an entry is either in
