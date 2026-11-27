@@ -84,7 +84,7 @@ None of these throws because of the Hub. A rejected event stays in `outbox_event
 
 ## What belongs here
 
-A module belongs in commons when **two or more apps use it**, it holds **no app's domain logic**, and it holds **no state of its own** (a table it defines is the app's, in the app's database, migrated by the app; [ADR-0005](docs/adr/0005-modules-may-define-app-owned-tables.md)). Each app keeps its own bindings, secrets and configuration; nothing here reads an environment variable. Everything else stays in the app.
+A module belongs in commons when **two or more apps use it**, it holds **no app's domain logic**, and it holds **no state of its own** (a table it defines is the app's, in the app's database, migrated by the app; [ADR-0005](docs/adr/0005-modules-may-define-app-owned-tables.md); an in-memory cache of what it can fetch again is not state; [ADR-0008](docs/adr/0008-oidc-claim-types-in-commons-storage-in-apps.md)). Each app keeps its own bindings, secrets and configuration; nothing here reads an environment variable. Everything else stays in the app.
 
 Planned next, each behind its own entry point: `m2m` (API errors; client-credentials tokens are `oidc`'s `clientCredentialsToken`), `outbox/do` (the outbox for Durable Objects) and `feedback` (the feedback server helper, with the dialog at `feedback/react`, per the feedback repo's spec 002).
 
@@ -104,4 +104,4 @@ npm run build       # dist/, as consumers get it
 1. In the PR, bump `version` in `package.json` and add a `## X.Y.Z — YYYY-MM-DD` section to `CHANGELOG.md`, grouped by entry point.
 2. Merge to `main`, then run the **Release** workflow from `main`. It checks the build, tags `vX.Y.Z` and publishes a GitHub release with that changelog section.
 
-Follow semver across the whole package: a breaking change in any entry point is a major bump. Keep breaking changes rare.
+Follow semver across the whole package: a breaking change in any entry point is a minor bump while commons is below 1.0, and a major bump from 1.0 on. Keep breaking changes rare.

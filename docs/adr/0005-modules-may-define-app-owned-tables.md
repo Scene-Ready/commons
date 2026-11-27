@@ -15,6 +15,6 @@ Commons ships the schema as numbered SQL files (`migrations/<module>/NNNN_*.sql`
 
 ## Consequences
 
-- Schema changes ship as new numbered files and must be additive. A non-additive change is a major version.
+- Schema changes ship as new numbered files and must be additive. A non-additive change is a breaking change (a minor version below 1.0, a major one after).
 - Each new migration file gets a CHANGELOG line telling apps to copy it.
 - The table's data never leaves the app's database. Commons only reads and writes it through the D1 binding the app passes in.
