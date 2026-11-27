@@ -201,7 +201,7 @@ export function createFakeIssuer(options: FakeIssuerOptions = {}): FakeIssuer {
     if ('status' in outcome) return statusOnly(outcome.status);
 
     const clientId = basicClientId(request);
-    if (clientId === null) return oauthError('invalid_client', 401);
+    if (clientId === null) return oauthError('invalid_client');
     const form = new URLSearchParams(await request.text());
     const requested = form.getAll('resource');
 
@@ -417,7 +417,20 @@ function invalidToken(): Response {
   });
 }
 
+/**
+ * An OAuth error from the token endpoint. `invalid_client` is a 401 with
+ * `WWW-Authenticate`, as RFC 6749 §5.2 requires after `client_secret_basic`.
+ */
 function oauthError(error: string, status = 400): Response {
+  if (error === 'invalid_client') {
+    return Response.json(
+      { error },
+      {
+        status: 401,
+        headers: { 'cache-control': 'no-store', 'www-authenticate': 'Basic realm="token"' },
+      },
+    );
+  }
   return Response.json({ error }, { status, headers: { 'cache-control': 'no-store' } });
 }
 

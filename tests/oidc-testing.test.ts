@@ -173,6 +173,7 @@ describe('createFakeIssuer', () => {
       body: new URLSearchParams({ grant_type: 'client_credentials' }),
     });
     expect(res.status).toBe(401);
+    expect(res.headers.get('www-authenticate')).toMatch(/^Basic /);
     expect(await res.json()).toMatchObject({ error: 'invalid_client' });
   });
 
