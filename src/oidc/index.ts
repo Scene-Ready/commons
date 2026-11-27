@@ -52,8 +52,12 @@ export type FinishSignInResult =
 export type RefreshResult =
   | { ok: true; tokens: TokenSet }
   | { ok: false; reason: 'not_signed_in' | 'invalid' | 'unavailable' }
-  /** The new ID token's Active Org differs from the old; null when it has none. */
-  | { ok: false; reason: 'org_changed'; activeOrgId: string | null };
+  /**
+   * The new ID token's Active Org differs from the old; null when it has none.
+   * `tokens` are the verified new ones: auth has already rotated the refresh
+   * token, so an app that keeps the session in its own Org stores them.
+   */
+  | { ok: false; reason: 'org_changed'; activeOrgId: string | null; tokens: TokenSet };
 
 export type UserInfoResult =
   | { ok: true; identity: Identity }
@@ -98,7 +102,8 @@ export interface OidcClient {
   /**
    * A new `TokenSet` from the refresh token. It never moves a session to
    * another org: when the new ID token's Active Org differs from the old one it
-   * answers `org_changed` and no tokens, and the app runs Org follow.
+   * answers `org_changed` with the new tokens, and the app runs Org follow. The
+   * old refresh token is spent by then, so keep the session with `tokens`.
    */
   refresh(tokens: TokenSet): Promise<RefreshResult>;
   /** Whether the access token expires within `skewMs` of `now` (epoch ms). */
@@ -135,15 +140,17 @@ export interface OidcClient {
    */
   verifyAccessToken(token: string): Promise<VerifyAccessTokenResult>;
   /**
-   * An app-to-app access token for another app's API (`audience`, its
-   * registered resource), from the client-credentials grant. Kept in memory per
-   * audience and scopes until 60 s before it expires; concurrent callers share
+   * An app-to-app access token from the client-credentials grant. With
+   * `audience` (another app's registered resource) it sends `resource` and auth
+   * issues a JWT for that app's API; without it, auth issues the opaque token its
+   * own app-to-app routes take. Kept in memory per audience (or none) and
+   * scopes until 60 s before it expires; concurrent callers share
    * one request. `unavailable` for a network error, a 5xx or a 429; any OAuth error
    * from auth (`invalid_client`, `invalid_scope`, ...) is misconfiguration and
    * throws.
    */
   clientCredentialsToken(options: {
-    audience: string;
+    audience?: string;
     scopes: string[];
   }): Promise<ClientCredentialsTokenResult>;
 }
@@ -176,7 +183,7 @@ export function createOidcClient(config: OidcClientConfig): OidcClient {
   // isn't in discovery (auth integration guide §11b).
   const activeOrgEndpoint = new URL('/api/oidc/organizations/active', issuer);
 
-  /** App-to-app tokens by audience and scopes: the only state commons keeps. */
+  /** App-to-app tokens by audience (or none) and scopes: the only state commons keeps. */
   const clientCredentials = new Map<
     string,
     Promise<{ accessToken: string; expiresAt: number } | null>
@@ -213,13 +220,15 @@ export function createOidcClient(config: OidcClientConfig): OidcClient {
   }
 
   /**
-   * A client-credentials token for `audience`, or null when auth can't be
-   * reached. Throws on an OAuth error: with no user involved, it is misconfiguration.
+   * A client-credentials token for `audience` (no `resource` without one), or
+   * null when auth can't be reached. Throws on an OAuth error: with no user
+   * involved, it is misconfiguration.
    */
-  async function mintClientCredentials(audience: string, scope: string) {
+  async function mintClientCredentials(audience: string | undefined, scope: string) {
     const found = await discovered();
     if (!found) return null;
-    const parameters = new URLSearchParams({ resource: audience });
+    const parameters = new URLSearchParams();
+    if (audience !== undefined) parameters.set('resource', audience);
     if (scope) parameters.set('scope', scope);
     let response: Response;
     try {
@@ -245,7 +254,7 @@ export function createOidcClient(config: OidcClientConfig): OidcClient {
       const refused = oauthErrorCode(error);
       if (refused) {
         throw new Error(
-          `clientCredentialsToken: auth refused the request (${refused}): check the client and its grants for ${audience}`,
+          `clientCredentialsToken: auth refused the request (${refused}): check the client and its grants${audience === undefined ? '' : ` for ${audience}`}`,
           { cause: error },
         );
       }
@@ -408,8 +417,11 @@ export function createOidcClient(config: OidcClientConfig): OidcClient {
 
       const before = tokens.claims.entitlements?.organizationId ?? null;
       const after = verified.claims.entitlements?.organizationId ?? null;
-      if (after !== before) return { ok: false, reason: 'org_changed', activeOrgId: after };
-      return { ok: true, tokens: tokenSet(body, body.id_token, verified.claims, tokens) };
+      const next = tokenSet(body, body.id_token, verified.claims, tokens);
+      if (after !== before) {
+        return { ok: false, reason: 'org_changed', activeOrgId: after, tokens: next };
+      }
+      return { ok: true, tokens: next };
     },
 
     isExpiring(tokens, now, skewMs = 60_000) {
@@ -509,7 +521,7 @@ export function createOidcClient(config: OidcClientConfig): OidcClient {
     },
 
     async clientCredentialsToken({ audience, scopes }) {
-      absoluteUrl(audience, 'audience', 'clientCredentialsToken');
+      if (audience !== undefined) absoluteUrl(audience, 'audience', 'clientCredentialsToken');
       if (
         !Array.isArray(scopes) ||
         !scopes.every((s) => typeof s === 'string' && /^\S+$/.test(s))
@@ -517,7 +529,7 @@ export function createOidcClient(config: OidcClientConfig): OidcClient {
         throw new TypeError('clientCredentialsToken: scopes must be an array of scope names');
       }
       const scope = [...new Set(scopes)].sort().join(' ');
-      const key = JSON.stringify([audience, scope]);
+      const key = JSON.stringify([audience ?? null, scope]);
       let entry = clientCredentials.get(key);
       if (entry) {
         // A failed request is dropped once it settles, so an entry is either in

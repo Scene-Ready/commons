@@ -242,6 +242,8 @@ export function createFakeIssuer(options: FakeIssuerOptions = {}): FakeIssuer {
         const resource = requested;
         const scope = form.get('scope') ?? '';
         const claims = { sub: clientId, client_id: clientId, scope, ...outcome.claims };
+        // A JWT for the requested resource; without one, an opaque token that
+        // userinfo answers, as auth issues for its own app-to-app routes.
         const access =
           outcome.accessToken ??
           (resource.length
