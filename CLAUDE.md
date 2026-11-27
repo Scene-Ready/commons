@@ -20,7 +20,7 @@ docs/adr/               decisions
 - **No state of its own, no configuration.** Nothing reads environment variables, bindings or secrets; callers pass them in. A module may define a table that the app owns, lives in the app's database and the app migrates (ADR 0005): ship it as `migrations/<module>/NNNN_*.sql`, additive only, with a version constant and a CHANGELOG line. A module may keep an in-memory cache, for the isolate's lifetime, of what it can fetch again, such as OIDC discovery or app-to-app tokens (ADR 0008); anything that has to outlive the isolate, the app stores.
 - **Runs in Workers and browsers.** Use Web Platform APIs (`crypto.subtle`, `fetch`, `TextEncoder`), never `node:` modules. A module built on a Workers binding (`outbox`, on D1) runs in Workers only; say so in its README row.
 - **A new module** gets its own entry point in `package.json` `exports`, a test file, a `CHANGELOG.md` line and a README table row. Framework-specific code goes behind its own entry point over a framework-neutral core.
-- **Breaking changes** to any entry point are a major version. Update `docs/contracts/` in the same change when a standard moves.
+- **Breaking changes** to any entry point follow semver: a minor version while commons is below 1.0, a major version from 1.0 on. Mark them **Breaking** in the CHANGELOG. Update `docs/contracts/` in the same change when a standard moves.
 - **No dependency** without a reason: every app installs it. Prefer optional peer dependencies for frameworks.
 
 ## Agent skills
