@@ -241,9 +241,10 @@ export function createOidcClient(config: OidcClientConfig): OidcClient {
     try {
       body = await oauth.processClientCredentialsResponse(found.as, client, response);
     } catch (error) {
-      if (error instanceof oauth.ResponseBodyError) {
+      const refused = oauthErrorCode(error);
+      if (refused) {
         throw new Error(
-          `clientCredentialsToken: auth refused the request (${error.error}): check the client and its grants for ${audience}`,
+          `clientCredentialsToken: auth refused the request (${refused}): check the client and its grants for ${audience}`,
           { cause: error },
         );
       }
@@ -565,11 +566,25 @@ export function createOidcClient(config: OidcClientConfig): OidcClient {
 
 /** auth's `invalid_client` is misconfiguration (a wrong client id or secret), so it throws. */
 function throwIfClientRefused(error: unknown): void {
-  if (error instanceof oauth.ResponseBodyError && error.error === 'invalid_client') {
+  if (oauthErrorCode(error) === 'invalid_client') {
     throw new Error('auth refused the client: check the client id and client secret', {
       cause: error,
     });
   }
+}
+
+/**
+ * The OAuth error a token-endpoint failure carries, or null when it carries
+ * none (a network error, a malformed answer). auth answers a refused client
+ * with a 401 and `WWW-Authenticate` (RFC 6749 §5.2), which oauth4webapi
+ * raises as a challenge before reading the body: that is `invalid_client`.
+ */
+function oauthErrorCode(error: unknown): string | null {
+  if (error instanceof oauth.ResponseBodyError) return error.error;
+  if (error instanceof oauth.WWWAuthenticateChallengeError && error.status === 401) {
+    return 'invalid_client';
+  }
+  return null;
 }
 
 /**
